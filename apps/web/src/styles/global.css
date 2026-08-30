@@ -149,6 +149,82 @@ h1 i {
   overflow-x: auto;
   border-bottom: 1px solid #edf0f0;
 }
+.phase-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 26px 0;
+}
+.phase-toolbar > div {
+  display: flex;
+  gap: 8px;
+}
+.phase-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  margin: 0 -30px -30px;
+}
+.phase-content {
+  padding: 30px;
+  min-width: 0;
+}
+.phase-inspector {
+  border-left: 1px solid var(--line);
+  background: #fbfbf8;
+  padding: 30px 24px;
+}
+.phase-inspector > small {
+  letter-spacing: 0.09em;
+  font-weight: 700;
+}
+.phase-inspector h2 {
+  margin: 10px 0;
+}
+.phase-inspector hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 24px 0;
+}
+.phase-inspector dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  line-height: 2;
+}
+.phase-inspector dd {
+  margin: 0;
+}
+.advisory {
+  margin-top: 24px;
+  padding: 14px;
+  background: #fff8df;
+  border-left: 3px solid #d4a017;
+}
+.advisory p {
+  margin-bottom: 0;
+}
+.managed-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 20px;
+}
+.managed-phase {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) repeat(4, 36px);
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px;
+}
+.managed-phase > div {
+  display: flex;
+  flex-direction: column;
+}
+.managed-phase small {
+  color: #69747c;
+  margin-top: 3px;
+}
 .phase-nav button {
   background: none;
   border: 0;
@@ -877,5 +953,23 @@ footer {
   }
   .modal {
     padding: 20px;
+  }
+  .phase-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .phase-toolbar > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .phase-layout {
+    display: block;
+  }
+  .phase-inspector {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .managed-phase {
+    grid-template-columns: 32px minmax(0, 1fr) repeat(4, 32px);
   }
 }

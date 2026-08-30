@@ -88,6 +88,7 @@ app.post(
   zValidator('json', createPhaseSchema),
   async (c) => ok(c, await service.createPhase(id(c, 'collectionId'), c.req.valid('json')), 201),
 );
+app.get('/api/phases/:phaseId', async (c) => ok(c, await service.phase(id(c, 'phaseId'))));
 app.patch('/api/phases/:phaseId', zValidator('json', updatePhaseSchema), async (c) =>
   ok(c, await service.updatePhase(id(c, 'phaseId'), c.req.valid('json'))),
 );

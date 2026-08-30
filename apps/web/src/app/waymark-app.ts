@@ -6,19 +6,35 @@ import {
   type CollectionInput,
   type CollectionStatus,
   type Phase,
+  type PhaseInput,
   type Task,
 } from '../services/api-client';
 
 type Route =
-  | { kind: 'collection'; id: string }
+  | { kind: 'collection'; id: string; destination?: 'backlog' | 'phase'; phaseId?: string }
   | { kind: 'today' | 'upcoming' | 'done' | 'archived' }
   | { kind: 'root' };
 type Modal =
   | { kind: 'form'; collection?: Collection }
+  | { kind: 'phases' }
+  | { kind: 'phase-form'; phase?: Phase }
+  | { kind: 'phase-delete'; phase: Phase }
   | { kind: 'archive' | 'delete'; collection: Collection }
   | null;
 const lastKey = 'waymark:lastCollectionId';
+const phaseKey = (id: string) => `waymark:lastPhase:${id}`;
 const readRoute = (): Route => {
+  const phase = location.pathname.match(/^\/collections\/([^/]+)\/phases\/([^/]+)$/);
+  if (phase?.[1] && phase[2])
+    return {
+      kind: 'collection',
+      id: decodeURIComponent(phase[1]),
+      destination: 'phase',
+      phaseId: decodeURIComponent(phase[2]),
+    };
+  const backlog = location.pathname.match(/^\/collections\/([^/]+)\/backlog$/);
+  if (backlog?.[1])
+    return { kind: 'collection', id: decodeURIComponent(backlog[1]), destination: 'backlog' };
   const match = location.pathname.match(/^\/collections\/([^/]+)$/);
   if (match?.[1]) return { kind: 'collection', id: decodeURIComponent(match[1]) };
   const kind = location.pathname.slice(1);
@@ -44,6 +60,7 @@ export class WaymarkApp extends LitElement {
   @state() private actionsOpen = false;
   private loadId = 0;
   private draggedId: string | null = null;
+  private draggedPhaseId: string | null = null;
   private returnFocus: HTMLElement | null = null;
 
   createRenderRoot() {
@@ -104,6 +121,23 @@ export class WaymarkApp extends LitElement {
         this.tasks = tasks;
         this.phases = phases;
         localStorage.setItem(lastKey, collection.id);
+        if (collection.structure === 'PHASED') {
+          if (!this.route.destination) {
+            const remembered = localStorage.getItem(phaseKey(collection.id));
+            const target = phases.find((phase) => phase.id === remembered) ?? phases[0];
+            return this.navigate(
+              target
+                ? `/collections/${collection.id}/phases/${target.id}`
+                : `/collections/${collection.id}/backlog`,
+              true,
+            );
+          }
+          if (this.route.destination === 'phase') {
+            const phaseId = this.route.phaseId;
+            const target = phases.find((phase) => phase.id === phaseId);
+            if (target) localStorage.setItem(phaseKey(collection.id), target.id);
+          }
+        }
       } else if (this.route.kind === 'archived') {
         const all = await api.collections(true);
         if (token !== this.loadId) return;
@@ -283,6 +317,113 @@ export class WaymarkApp extends LitElement {
     next.splice(to, 0, moved!);
     this.draggedId = null;
     void this.persistOrder(next, previous, moved!, to);
+  }
+
+  private phaseInput(form: HTMLFormElement): PhaseInput | null {
+    const data = new FormData(form);
+    const name = String(data.get('name') ?? '').trim();
+    const startDate = String(data.get('startDate') ?? '') || null;
+    const targetEndDate = String(data.get('targetEndDate') ?? '') || null;
+    const errors: Record<string, string> = {};
+    if (!name) errors.name = 'Enter a phase name.';
+    if (startDate && targetEndDate && targetEndDate < startDate)
+      errors.targetEndDate = 'Target end date cannot be before the start date.';
+    this.errors = errors;
+    if (Object.keys(errors).length) return null;
+    return {
+      name,
+      description: String(data.get('description') ?? '').trim() || null,
+      startDate,
+      targetEndDate,
+    };
+  }
+  private async savePhase(event: SubmitEvent) {
+    event.preventDefault();
+    if (!this.selected || this.modal?.kind !== 'phase-form') return;
+    const input = this.phaseInput(event.currentTarget as HTMLFormElement);
+    if (!input) return;
+    this.submitting = true;
+    const existing = this.modal.phase;
+    try {
+      const saved = existing
+        ? await api.updatePhase(existing.id, input)
+        : await api.createPhase(this.selected.id, input);
+      this.phases = await api.phases(this.selected.id);
+      this.modal = { kind: 'phases' };
+      this.notice = existing ? 'Phase updated.' : 'Phase created.';
+      this.navigate(`/collections/${this.selected.id}/phases/${saved.id}`, Boolean(existing));
+      void this.updateComplete.then(() =>
+        document.querySelector<HTMLElement>('#phase-title')?.focus(),
+      );
+    } catch (error) {
+      this.errors = { form: error instanceof Error ? error.message : 'Could not save phase.' };
+    } finally {
+      this.submitting = false;
+    }
+  }
+  private async persistPhaseOrder(next: Phase[], previous: Phase[], moved: Phase) {
+    this.phases = next.map((phase, position) => ({ ...phase, position }));
+    try {
+      await api.reorderPhases(
+        this.selected!.id,
+        next.map((phase) => phase.id),
+      );
+      this.phases = await api.phases(this.selected!.id);
+      this.notice = `Moved ${moved.name} to position ${this.phases.findIndex((p) => p.id === moved.id) + 1}.`;
+      void this.updateComplete.then(() =>
+        document.querySelector<HTMLElement>(`[data-phase-id="${moved.id}"]`)?.focus(),
+      );
+    } catch (error) {
+      this.phases = previous;
+      this.notice = error instanceof Error ? error.message : 'Could not reorder phases.';
+    }
+  }
+  private movePhase(id: string, delta: number) {
+    const from = this.phases.findIndex((phase) => phase.id === id),
+      to = from + delta;
+    if (from < 0 || to < 0 || to >= this.phases.length) return;
+    const previous = [...this.phases],
+      next = [...previous];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    void this.persistPhaseOrder(next, previous, next[to]!);
+  }
+  private dropPhase(targetId: string) {
+    if (!this.draggedPhaseId || this.draggedPhaseId === targetId) return;
+    const previous = [...this.phases],
+      next = [...previous];
+    const from = next.findIndex((phase) => phase.id === this.draggedPhaseId),
+      to = next.findIndex((phase) => phase.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
+    this.draggedPhaseId = null;
+    void this.persistPhaseOrder(next, previous, moved!);
+  }
+  private async confirmDeletePhase() {
+    if (!this.selected || this.modal?.kind !== 'phase-delete') return;
+    const deleted = this.modal.phase;
+    const index = this.phases.findIndex((phase) => phase.id === deleted.id);
+    this.submitting = true;
+    try {
+      await api.deletePhase(deleted.id);
+      const next = this.phases.filter((phase) => phase.id !== deleted.id);
+      this.phases = next;
+      this.modal = { kind: 'phases' };
+      this.notice = 'Phase deleted.';
+      if (this.route.kind === 'collection' && this.route.phaseId === deleted.id) {
+        const destination = next[index] ?? next[index - 1];
+        this.navigate(
+          destination
+            ? `/collections/${this.selected.id}/phases/${destination.id}`
+            : `/collections/${this.selected.id}/backlog`,
+          true,
+        );
+      }
+    } catch (error) {
+      this.errors = { form: error instanceof Error ? error.message : 'Could not delete phase.' };
+    } finally {
+      this.submitting = false;
+    }
   }
 
   private sidebar() {
@@ -481,18 +622,121 @@ export class WaymarkApp extends LitElement {
     </section>`;
   }
   private phasedView() {
+    const phaseId = this.route.kind === 'collection' ? this.route.phaseId : undefined;
+    const selected =
+      this.route.kind === 'collection' && this.route.destination === 'phase'
+        ? this.phases.find((phase) => phase.id === phaseId)
+        : undefined;
+    const unknown =
+      this.route.kind === 'collection' && this.route.destination === 'phase' && !selected;
+    const selectedIndex = selected ? this.phases.indexOf(selected) : -1;
+    const visibleTasks = selected
+      ? this.tasks.filter((task) => task.phaseId === selected.id)
+      : this.tasks.filter((task) => !task.phaseId);
+    const earlierIncomplete = selected
+      ? this.phases.slice(0, selectedIndex).filter((phase) => !phase.isComplete)
+      : [];
     return html`<section class="workspace">
+      <div class="phase-toolbar">
+        <div>
+          <button
+            class="outline"
+            ?disabled=${selectedIndex <= 0}
+            @click=${() => this.navigate(`/collections/${this.selected!.id}/phases/${this.phases[selectedIndex - 1]?.id}`)}
+          >
+            <i class="ph ph-arrow-left"></i>Previous phase</button
+          ><button
+            class="outline"
+            ?disabled=${selectedIndex < 0 || selectedIndex >= this.phases.length - 1}
+            @click=${() => this.navigate(`/collections/${this.selected!.id}/phases/${this.phases[selectedIndex + 1]?.id}`)}
+          >
+            Next phase<i class="ph ph-arrow-right"></i>
+          </button>
+        </div>
+        <button
+          class="outline manage-phases"
+          @click=${(event: MouseEvent) => this.openModal({ kind: 'phases' }, event.currentTarget as HTMLElement)}
+        >
+          <i class="ph ph-sliders-horizontal"></i>Manage phases
+        </button>
+      </div>
       <div class="phase-nav" aria-label="Phases">
-        <button class="current">
+        <button
+          class=${!selected && !unknown ? 'current' : ''}
+          @click=${() => this.navigate(`/collections/${this.selected!.id}/backlog`)}
+        >
           <span><i class="ph ph-tray"></i></span><b>Backlog</b
           ><small>${this.tasks.filter((task) => !task.phaseId).length} tasks</small></button
-        >${this.phases.map((phase, index) => html`<button disabled><span>${index + 1}</span><b>${phase.name}</b><small>${this.tasks.filter((task) => task.phaseId === phase.id).length} tasks</small></button>`)}
+        >${this.phases.map((phase, index) => html`<button class=${`${selected?.id === phase.id ? 'current' : ''} ${phase.isComplete ? 'complete' : ''}`} @click=${() => this.navigate(`/collections/${this.selected!.id}/phases/${phase.id}`)}><span>${phase.isComplete ? html`<i class="ph ph-check"></i>` : index + 1}</span><b>${phase.name}</b><small>${phase.completedTaskCount}/${phase.taskCount} complete</small></button>`)}
       </div>
-      <div class="inline-empty">
-        <i class="ph ph-stack"></i>
-        <h3>${this.phases.length ? 'Backlog' : 'No phases yet'}</h3>
-        <p>Phase and task editing are intentionally unavailable in this pass.</p>
-      </div>
+      ${
+        unknown
+          ? html`<div class="inline-empty">
+              <i class="ph ph-warning-circle"></i>
+              <h3>Phase not found</h3>
+              <p>This phase does not exist in ${this.selected!.name}.</p>
+              <button
+                class="primary"
+                @click=${() => this.navigate(`/collections/${this.selected!.id}/backlog`, true)}
+              >
+                Open backlog
+              </button>
+            </div>`
+          : html`<div class="phase-layout">
+              <div class="phase-content">
+                <div class="section-title">
+                  <h2>${selected?.name ?? 'Backlog'} <span>${visibleTasks.length}</span></h2>
+                </div>
+                ${
+                  visibleTasks.length
+                    ? html`<div class="simple-list">
+                        ${visibleTasks.map((task) => html`<div><i class=${task.completedAt ? 'ph ph-check-circle' : 'ph ph-circle'}></i><strong>${task.name}</strong>${task.dueDate ? html`<span>${task.dueDate}</span>` : nothing}</div>`)}
+                      </div>`
+                    : html`<div class="inline-empty">
+                        <i class=${selected ? 'ph ph-stack' : 'ph ph-tray'}></i>
+                        <h3>No tasks yet</h3>
+                        <p>
+                          ${selected ? 'This phase is incomplete until it contains completed work.' : 'Unassigned tasks will appear in the backlog.'}
+                        </p>
+                      </div>`
+                }
+              </div>
+              ${
+                selected
+                  ? html`<aside class="phase-inspector">
+                      <small>PHASE ${selected.position + 1} OF ${this.phases.length}</small>
+                      <h2 id="phase-title" tabindex="-1">${selected.name}</h2>
+                      <p>${selected.description ?? 'No description or goal provided.'}</p>
+                      <p class="schedule">
+                        <i class="ph ph-calendar-blank"></i
+                        >${selected.startDate || selected.targetEndDate ? `${selected.startDate ?? 'No start'} – ${selected.targetEndDate ?? 'No target'}` : 'No schedule'}
+                      </p>
+                      <hr />
+                      <dl>
+                        <dt>Tasks</dt>
+                        <dd>${selected.taskCount}</dd>
+                        <dt>Completed</dt>
+                        <dd>${selected.completedTaskCount}</dd>
+                        <dt>Progress</dt>
+                        <dd>${Math.round(selected.progress * 100)}%</dd>
+                        <dt>Status</dt>
+                        <dd>
+                          ${selected.taskCount === 0 ? 'No tasks yet' : selected.isComplete ? 'Complete' : 'In progress'}
+                        </dd>
+                      </dl>
+                      ${
+                        earlierIncomplete.length
+                          ? html`<div class="advisory">
+                              <b>Earlier incomplete phases</b>
+                              <p>${earlierIncomplete.map((phase) => phase.name).join(', ')}</p>
+                            </div>`
+                          : nothing
+                      }
+                    </aside>`
+                  : nothing
+              }
+            </div>`
+      }
     </section>`;
   }
   private archivedView() {
@@ -684,6 +928,158 @@ export class WaymarkApp extends LitElement {
       </div>
     </dialog>`;
   }
+  private managePhasesModal() {
+    return html`<dialog
+      class="modal phase-manager"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      @keydown=${this.trap}
+    >
+      <div class="modal-heading">
+        <div>
+          <small>COLLECTION PHASES</small>
+          <h2 id="modal-title">Manage phases</h2>
+        </div>
+        <button class="icon-button" aria-label="Close dialog" @click=${this.closeModal}>
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <p>Drag phases into order, or use the move buttons. Changes are saved immediately.</p>
+      <div class="managed-phases">
+        ${this.phases.map(
+          (phase, index) =>
+            html`<div
+              class="managed-phase"
+              draggable="true"
+              @dragstart=${() => (this.draggedPhaseId = phase.id)}
+              @dragover=${(event: DragEvent) => event.preventDefault()}
+              @drop=${() => this.dropPhase(phase.id)}
+            >
+              <button
+                class="drag"
+                data-phase-id=${phase.id}
+                aria-label=${`Drag ${phase.name}`}
+                @keydown=${(event: KeyboardEvent) => {
+                  if (event.altKey && event.key === 'ArrowUp') this.movePhase(phase.id, -1);
+                  if (event.altKey && event.key === 'ArrowDown') this.movePhase(phase.id, 1);
+                }}
+              >
+                <i class="ph ph-dots-six-vertical"></i>
+              </button>
+              <div>
+                <b>${phase.name}</b
+                ><small
+                  >${phase.taskCount} ${phase.taskCount === 1 ? 'task' : 'tasks'} ·
+                  ${Math.round(phase.progress * 100)}%</small
+                >
+              </div>
+              <button
+                class="icon-button"
+                aria-label=${`Move ${phase.name} up`}
+                ?disabled=${index === 0}
+                @click=${() => this.movePhase(phase.id, -1)}
+              >
+                <i class="ph ph-caret-up"></i></button
+              ><button
+                class="icon-button"
+                aria-label=${`Move ${phase.name} down`}
+                ?disabled=${index === this.phases.length - 1}
+                @click=${() => this.movePhase(phase.id, 1)}
+              >
+                <i class="ph ph-caret-down"></i></button
+              ><button
+                class="icon-button"
+                aria-label=${`Edit ${phase.name}`}
+                @click=${() => this.openModal({ kind: 'phase-form', phase })}
+              >
+                <i class="ph ph-pencil-simple"></i></button
+              ><button
+                class="icon-button danger-text"
+                aria-label=${phase.taskCount ? `Cannot delete ${phase.name}: tasks must be moved or deleted first` : `Delete ${phase.name}`}
+                @click=${() => (phase.taskCount ? (this.notice = `${phase.name} cannot be deleted. Move or delete its tasks first, including archived tasks.`) : this.openModal({ kind: 'phase-delete', phase }))}
+              >
+                <i class="ph ph-trash"></i>
+              </button>
+            </div>`,
+        )}
+      </div>
+      <div class="modal-actions">
+        <button class="primary" @click=${() => this.openModal({ kind: 'phase-form' })}>
+          <i class="ph ph-plus"></i>Add phase</button
+        ><button class="outline" @click=${this.closeModal}>Done</button>
+      </div>
+    </dialog>`;
+  }
+  private phaseFormModal(phase?: Phase) {
+    return html`<dialog
+      class="modal"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      @keydown=${this.trap}
+    >
+      <form @submit=${this.savePhase} novalidate>
+        <div class="modal-heading">
+          <div>
+            <small>PHASE</small>
+            <h2 id="modal-title">${phase ? 'Edit phase' : 'New phase'}</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Close dialog"
+            @click=${() => this.openModal({ kind: 'phases' })}
+          >
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+        ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}<label
+          >Name <span>Required</span><input name="name" .value=${phase?.name ?? ''} /></label
+        >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
+          >Description <span>Optional</span
+          ><textarea name="description" rows="3">${phase?.description ?? ''}</textarea>
+        </label>
+        <div class="form-grid">
+          <label
+            >Start date <span>Optional</span
+            ><input name="startDate" type="date" .value=${phase?.startDate ?? ''} /></label
+          ><label
+            >Target end date <span>Optional</span
+            ><input
+              name="targetEndDate"
+              type="date"
+              .value=${phase?.targetEndDate ?? ''}
+            />${this.errors.targetEndDate ? html`<small class="field-error" role="alert">${this.errors.targetEndDate}</small>` : nothing}</label
+          >
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="outline" @click=${() => this.openModal({ kind: 'phases' })}>
+            Cancel</button
+          ><button class="primary" ?disabled=${this.submitting}>
+            ${this.submitting ? 'Saving…' : phase ? 'Save changes' : 'Create phase'}
+          </button>
+        </div>
+      </form>
+    </dialog>`;
+  }
+  private phaseDeleteModal(phase: Phase) {
+    return html`<dialog
+      class="modal confirmation"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      @keydown=${this.trap}
+    >
+      <div class="danger-icon"><i class="ph ph-trash"></i></div>
+      <h2 id="confirm-title">Delete ${phase.name}?</h2>
+      <p>This empty phase will be permanently deleted. No tasks will be moved or deleted.</p>
+      ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
+      <div class="modal-actions">
+        <button class="outline" @click=${() => this.openModal({ kind: 'phases' })}>Cancel</button
+        ><button class="danger" ?disabled=${this.submitting} @click=${this.confirmDeletePhase}>
+          ${this.submitting ? 'Deleting…' : 'Delete phase'}
+        </button>
+      </div>
+    </dialog>`;
+  }
   render() {
     const content =
       this.route.kind === 'archived'
@@ -693,6 +1089,6 @@ export class WaymarkApp extends LitElement {
           : this.utilityView();
     return html`<div class="shell collection-shell">${this.sidebar()}${content}</div>
       <div class="sr-only" aria-live="polite">${this.notice}</div>
-      ${this.modal?.kind === 'form' ? this.formModal(this.modal.collection) : this.modal?.kind === 'archive' ? this.confirmModal(this.modal.collection, 'archive') : this.modal?.kind === 'delete' ? this.confirmModal(this.modal.collection, 'delete') : nothing}`;
+      ${this.modal?.kind === 'form' ? this.formModal(this.modal.collection) : this.modal?.kind === 'archive' ? this.confirmModal(this.modal.collection, 'archive') : this.modal?.kind === 'delete' ? this.confirmModal(this.modal.collection, 'delete') : this.modal?.kind === 'phases' ? this.managePhasesModal() : this.modal?.kind === 'phase-form' ? this.phaseFormModal(this.modal.phase) : this.modal?.kind === 'phase-delete' ? this.phaseDeleteModal(this.modal.phase) : nothing}`;
   }
 }

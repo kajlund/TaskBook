@@ -13,7 +13,20 @@ export type Collection = {
   progress: Progress;
   deletionImpact?: { phases: number; tasks: number; dependencyLinks: number };
 };
-export type Phase = { id: string; name: string; position: number };
+export type Phase = {
+  id: string;
+  collectionId: string;
+  name: string;
+  description: string | null;
+  position: number;
+  startDate: string | null;
+  targetEndDate: string | null;
+  taskCount: number;
+  completedTaskCount: number;
+  progress: number;
+  isComplete: boolean;
+};
+export type PhaseInput = Pick<Phase, 'name' | 'description' | 'startDate' | 'targetEndDate'>;
 export type Task = {
   id: string;
   name: string;
@@ -49,6 +62,7 @@ export const api = {
     request<Collection[]>(`/collections${includeArchived ? '?includeArchived=true' : ''}`),
   collection: (id: string) => request<Collection>(`/collections/${id}`),
   phases: (id: string) => request<Phase[]>(`/collections/${id}/phases`),
+  phase: (id: string) => request<Phase>(`/phases/${id}`),
   tasks: (id: string) => request<Task[]>(`/tasks?collectionId=${encodeURIComponent(id)}`),
   createCollection: (input: CollectionInput) =>
     request<Collection>('/collections', { method: 'POST', body: JSON.stringify(input) }),
@@ -61,4 +75,17 @@ export const api = {
   deleteCollection: (id: string) => request<void>(`/collections/${id}`, { method: 'DELETE' }),
   reorderCollections: (orderedIds: string[]) =>
     request('/collections/reorder', { method: 'POST', body: JSON.stringify({ orderedIds }) }),
+  createPhase: (collectionId: string, input: PhaseInput) =>
+    request<Phase>(`/collections/${collectionId}/phases`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updatePhase: (id: string, input: PhaseInput) =>
+    request<Phase>(`/phases/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deletePhase: (id: string) => request<Phase>(`/phases/${id}`, { method: 'DELETE' }),
+  reorderPhases: (collectionId: string, orderedIds: string[]) =>
+    request(`/collections/${collectionId}/phases/reorder`, {
+      method: 'POST',
+      body: JSON.stringify({ orderedIds }),
+    }),
 };

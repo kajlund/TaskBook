@@ -238,17 +238,29 @@ export class WaymarkService {
 
   async listPhases(collectionId: string) {
     await this.collection(collectionId);
-    return this.database
+    const rows = await this.database
       .select()
       .from(phases)
       .where(eq(phases.collectionId, collectionId))
       .orderBy(asc(phases.position));
+    const collectionTasks = await this.database
+      .select()
+      .from(tasks)
+      .where(eq(tasks.collectionId, collectionId));
+    return rows.map((phase) => this.phaseSummary(phase, collectionTasks));
+  }
+
+  async phase(id: string) {
+    const [phase] = await this.database.select().from(phases).where(eq(phases.id, id));
+    if (!phase) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+    const phaseTasks = await this.database.select().from(tasks).where(eq(tasks.phaseId, id));
+    return this.phaseSummary(phase, phaseTasks);
   }
 
   async createPhase(collectionId: string, input: z.infer<typeof createPhaseSchema>) {
     const collection = await this.collection(collectionId);
     if (collection.structure !== 'PHASED')
-      throw new DomainError('FLAT_COLLECTION_PHASE', 'Flat collections cannot contain phases', 422);
+      throw new DomainError('FLAT_COLLECTION_PHASE', 'Flat collections cannot contain phases', 409);
     const counts = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(phases)
@@ -257,17 +269,25 @@ export class WaymarkService {
       .insert(phases)
       .values({ ...input, collectionId, position: counts[0]?.count ?? 0 })
       .returning();
-    return created;
+    return this.phaseSummary(created!, []);
   }
 
   async updatePhase(id: string, input: z.infer<typeof updatePhaseSchema>) {
-    const [updated] = await this.database
+    const existing = await this.phase(id);
+    const startDate = input.startDate === undefined ? existing.startDate : input.startDate;
+    const targetEndDate =
+      input.targetEndDate === undefined ? existing.targetEndDate : input.targetEndDate;
+    if (startDate && targetEndDate && targetEndDate < startDate)
+      throw new DomainError(
+        'INVALID_PHASE_DATES',
+        'Target end date cannot precede start date',
+        422,
+      );
+    await this.database
       .update(phases)
       .set({ ...input, updatedAt: now() })
-      .where(eq(phases.id, id))
-      .returning();
-    if (!updated) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
-    return updated;
+      .where(eq(phases.id, id));
+    return this.phase(id);
   }
 
   async reorderPhases(collectionId: string, ids: string[]) {
@@ -295,19 +315,47 @@ export class WaymarkService {
   }
 
   async deletePhase(id: string) {
-    const counts = await this.database
-      .select({ count: sql<number>`count(*)::int` })
-      .from(tasks)
-      .where(and(eq(tasks.phaseId, id), isNull(tasks.archivedAt)));
-    if ((counts[0]?.count ?? 0) > 0)
-      throw new DomainError(
-        'PHASE_NOT_EMPTY',
-        'Move or archive all tasks before deleting this phase',
-        409,
-      );
-    const [deleted] = await this.database.delete(phases).where(eq(phases.id, id)).returning();
-    if (!deleted) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
-    return deleted;
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(phases).where(eq(phases.id, id));
+      if (!existing) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+      const counts = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(tasks)
+        .where(eq(tasks.phaseId, id));
+      if ((counts[0]?.count ?? 0) > 0)
+        throw new DomainError(
+          'PHASE_NOT_EMPTY',
+          'Tasks still reference this phase. Move or delete them before deleting the phase.',
+          409,
+        );
+      const [deleted] = await tx.delete(phases).where(eq(phases.id, id)).returning();
+      const remaining = await tx
+        .select({ id: phases.id })
+        .from(phases)
+        .where(eq(phases.collectionId, existing.collectionId))
+        .orderBy(asc(phases.position));
+      await tx
+        .update(phases)
+        .set({ position: sql`${phases.position} + 1000000` })
+        .where(eq(phases.collectionId, existing.collectionId));
+      for (const [position, item] of remaining.entries())
+        await tx.update(phases).set({ position, updatedAt: now() }).where(eq(phases.id, item.id));
+      return deleted;
+    });
+  }
+
+  private phaseSummary<T extends typeof phases.$inferSelect>(
+    phase: T,
+    phaseTasks: Array<typeof tasks.$inferSelect>,
+  ) {
+    const progress = calculateProgress(phaseTasks);
+    return {
+      ...phase,
+      taskCount: progress.total,
+      completedTaskCount: progress.completed,
+      progress: progress.ratio,
+      isComplete: progress.total > 0 && progress.completed === progress.total,
+    };
   }
 
   async listTasks(filters: {

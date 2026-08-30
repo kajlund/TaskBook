@@ -78,7 +78,7 @@ describe('collection navigation', () => {
     const link = element.querySelector<HTMLAnchorElement>(`a[href="/collections/${phased.id}"]`)!;
     link.click();
     await settle(element);
-    expect(location.pathname).toBe(`/collections/${phased.id}`);
+    expect(location.pathname).toBe(`/collections/${phased.id}/backlog`);
     expect(element.querySelector('#collection-title')?.textContent).toBe('Website Redesign');
     expect(link.getAttribute('aria-current')).toBe('page');
   });

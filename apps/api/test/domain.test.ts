@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createCollectionSchema, updateCollectionSchema } from '@waymark/contracts';
+import {
+  createCollectionSchema,
+  createPhaseSchema,
+  updateCollectionSchema,
+} from '@waymark/contracts';
 import { assertAcyclic } from '../src/domain/dependencies.js';
 import { calculateProgress, isPhaseComplete } from '../src/domain/progress.js';
 import { validateReorder } from '../src/domain/ordering.js';
@@ -29,6 +33,17 @@ describe('domain rules', () => {
     expect(updateCollectionSchema.parse({ structure: 'PHASED' })).toEqual({
       structure: 'PHASED',
     });
+  });
+  it('trims phase names and validates phase dates', () => {
+    expect(createPhaseSchema.parse({ name: ' Discovery ' }).name).toBe('Discovery');
+    expect(() => createPhaseSchema.parse({ name: '   ' })).toThrow();
+    expect(() =>
+      createPhaseSchema.parse({
+        name: 'Build',
+        startDate: '2026-10-02',
+        targetEndDate: '2026-10-01',
+      }),
+    ).toThrow(/Target end date/);
   });
   it('returns zero progress for no active tasks', () =>
     expect(calculateProgress([])).toEqual({ completed: 0, total: 0, ratio: 0 }));
