@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { Hono } from 'hono';
 import pino from 'pino';
 import { zValidator } from '@hono/zod-validator';
+import { serveStatic } from '@hono/node-server/serve-static';
 
 import {
   createCollectionSchema,
@@ -173,6 +174,16 @@ app.delete('/api/tasks/:taskId', async (c) => {
   await service.deleteTask(id(c, 'taskId'));
   return c.body(null, 204);
 });
+
+app.all('/api/*', (c) =>
+  c.json(
+    { error: { code: 'NOT_FOUND', message: 'Route not found', requestId: c.get('requestId') } },
+    404,
+  ),
+);
+
+app.use('/*', serveStatic({ root: '../web/dist' }));
+app.get('*', serveStatic({ root: '../web/dist', path: 'index.html' }));
 
 app.notFound((c) =>
   c.json(

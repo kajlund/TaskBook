@@ -68,7 +68,8 @@ export type CollectionInput = {
   startDate: string | null;
   targetEndDate: string | null;
 };
-const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+const baseUrl =
+  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '/api' : 'http://localhost:3000/api');
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,

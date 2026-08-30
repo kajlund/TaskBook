@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @waymark/api\" \"npm run dev -w @waymark/web\"",
+    "start": "npm run start -w @waymark/api",
     "build": "npm run build -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
     "test": "npm test -ws --if-present",
