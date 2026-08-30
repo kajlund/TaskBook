@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import type {
@@ -17,6 +17,7 @@ import { validateReorder } from '../domain/ordering.js';
 import { DomainError } from '../errors/domain-error.js';
 
 const now = () => new Date();
+type TaskDatabase = Pick<Database, 'select' | 'update'>;
 
 export class WaymarkService {
   constructor(private database: Database) {}
@@ -364,6 +365,10 @@ export class WaymarkService {
     unassigned?: boolean;
     completed?: boolean;
     includeArchived?: boolean;
+    waiting?: boolean;
+    urgency?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    dueBefore?: string;
+    dueAfter?: string;
   }) {
     const clauses = [];
     if (filters.collectionId) clauses.push(eq(tasks.collectionId, filters.collectionId));
@@ -371,18 +376,44 @@ export class WaymarkService {
     if (filters.unassigned) clauses.push(isNull(tasks.phaseId));
     if (filters.completed === true) clauses.push(sql`${tasks.completedAt} IS NOT NULL`);
     if (filters.completed === false) clauses.push(isNull(tasks.completedAt));
+    if (filters.urgency) clauses.push(eq(tasks.urgency, filters.urgency));
+    if (filters.dueBefore) clauses.push(lte(tasks.dueDate, filters.dueBefore));
+    if (filters.dueAfter) clauses.push(gt(tasks.dueDate, filters.dueAfter));
+    if (filters.waiting === true)
+      clauses.push(
+        sql`${tasks.waitingReason} IS NOT NULL OR EXISTS (SELECT 1 FROM ${taskDependencies} d JOIN ${tasks} dependency ON dependency.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dependency.completed_at IS NULL AND dependency.archived_at IS NULL)`,
+      );
+    if (filters.waiting === false)
+      clauses.push(
+        sql`${tasks.waitingReason} IS NULL AND NOT EXISTS (SELECT 1 FROM ${taskDependencies} d JOIN ${tasks} dependency ON dependency.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dependency.completed_at IS NULL AND dependency.archived_at IS NULL)`,
+      );
     if (!filters.includeArchived) clauses.push(isNull(tasks.archivedAt));
-    return this.database
+    const query = this.database
       .select()
       .from(tasks)
-      .where(and(...clauses))
-      .orderBy(asc(tasks.position));
+      .where(and(...clauses));
+    if (filters.completed === true) return query.orderBy(desc(tasks.completedAt));
+    if (filters.dueBefore || filters.dueAfter)
+      return query.orderBy(asc(tasks.dueDate), asc(tasks.collectionId), asc(tasks.position));
+    return query.orderBy(asc(tasks.position));
   }
 
   async task(id: string) {
     const [task] = await this.database.select().from(tasks).where(eq(tasks.id, id));
     if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
-    return task;
+    const dependencyRows = await this.dependenciesFor(id);
+    const blockingRows = await this.database
+      .select({ task: tasks })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+      .where(eq(taskDependencies.dependsOnTaskId, id));
+    return {
+      ...task,
+      dependencies: dependencyRows,
+      blockedTasks: blockingRows.map((row) => row.task),
+      isWaiting:
+        task.waitingReason !== null || dependencyRows.some((item) => item.completedAt === null),
+    };
   }
 
   async createTask(input: z.infer<typeof createTaskSchema>) {
@@ -403,8 +434,19 @@ export class WaymarkService {
 
   async updateTask(id: string, input: z.infer<typeof updateTaskSchema>) {
     const existing = await this.task(id);
-    if (input.phaseId !== undefined)
-      await this.assertTaskScope(existing.collectionId, input.phaseId);
+    if (input.phaseId !== undefined && input.phaseId !== existing.phaseId) {
+      const { phaseId, ...details } = input;
+      if (Object.keys(details).length)
+        await this.database
+          .update(tasks)
+          .set({ ...details, updatedAt: now() })
+          .where(eq(tasks.id, id));
+      const destination = await this.listTasks({
+        collectionId: existing.collectionId,
+        ...(phaseId ? { phaseId } : { unassigned: true }),
+      });
+      return this.moveTask(id, phaseId, destination.length);
+    }
     const [updated] = await this.database
       .update(tasks)
       .set({ ...input, updatedAt: now() })
@@ -451,8 +493,10 @@ export class WaymarkService {
 
   async moveTask(id: string, phaseId: string | null, position: number) {
     return this.database.transaction(async (tx) => {
-      const task = await this.task(id);
-      await this.assertTaskScope(task.collectionId, phaseId);
+      const [task] = await tx.select().from(tasks).where(eq(tasks.id, id));
+      if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+      await this.assertTaskScope(task.collectionId, phaseId, tx);
+      const sameScope = task.phaseId === phaseId;
       const target = await tx
         .select()
         .from(tasks)
@@ -466,6 +510,7 @@ export class WaymarkService {
         )
         .orderBy(asc(tasks.position));
       const bounded = Math.min(position, target.length);
+      if (!sameScope) await this.normalizeTaskScope(tx, task.collectionId, task.phaseId, id);
       await tx
         .update(tasks)
         .set({ position: sql`${tasks.position}+1000000` })
@@ -483,7 +528,8 @@ export class WaymarkService {
           .update(tasks)
           .set({ phaseId, position: index, updatedAt: now() })
           .where(eq(tasks.id, item.id));
-      return this.task(id);
+      const [updated] = await tx.select().from(tasks).where(eq(tasks.id, id));
+      return updated;
     });
   }
 
@@ -498,23 +544,93 @@ export class WaymarkService {
   }
 
   async archiveTask(id: string, restore = false) {
-    await this.task(id);
-    const [updated] = await this.database
-      .update(tasks)
-      .set({ archivedAt: restore ? null : now(), updatedAt: now() })
-      .where(eq(tasks.id, id))
-      .returning();
-    return updated;
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(tasks).where(eq(tasks.id, id));
+      if (!existing) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+      if (restore) {
+        const [collection] = await tx
+          .select()
+          .from(taskCollections)
+          .where(eq(taskCollections.id, existing.collectionId));
+        let phaseId = existing.phaseId;
+        if (phaseId) {
+          const [phase] = await tx
+            .select({ id: phases.id })
+            .from(phases)
+            .where(eq(phases.id, phaseId));
+          if (!phase) phaseId = null;
+        }
+        if (collection?.structure === 'FLAT') phaseId = null;
+        const active = await tx
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.collectionId, existing.collectionId),
+              phaseId ? eq(tasks.phaseId, phaseId) : isNull(tasks.phaseId),
+              isNull(tasks.archivedAt),
+            ),
+          );
+        const [updated] = await tx
+          .update(tasks)
+          .set({ archivedAt: null, phaseId, position: active.length, updatedAt: now() })
+          .where(eq(tasks.id, id))
+          .returning();
+        return updated;
+      }
+      const [updated] = await tx
+        .update(tasks)
+        .set({ archivedAt: now(), updatedAt: now() })
+        .where(eq(tasks.id, id))
+        .returning();
+      await this.normalizeTaskScope(tx, existing.collectionId, existing.phaseId, id);
+      return updated;
+    });
+  }
+
+  async deleteTask(id: string) {
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(tasks).where(eq(tasks.id, id));
+      if (!existing) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+      if (!existing.archivedAt)
+        throw new DomainError(
+          'TASK_NOT_ARCHIVED',
+          'Only archived tasks can be permanently deleted',
+          409,
+        );
+      await tx
+        .delete(taskDependencies)
+        .where(or(eq(taskDependencies.taskId, id), eq(taskDependencies.dependsOnTaskId, id)));
+      await tx.delete(tasks).where(eq(tasks.id, id));
+    });
   }
 
   async dependencies(taskId: string) {
-    await this.task(taskId);
-    return this.database.select().from(taskDependencies).where(eq(taskDependencies.taskId, taskId));
+    const [task] = await this.database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.id, taskId));
+    if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+    return this.dependenciesFor(taskId);
   }
 
   async addDependency(taskId: string, dependsOnTaskId: string) {
-    await Promise.all([this.task(taskId), this.task(dependsOnTaskId)]);
+    const [task, dependency] = await Promise.all([this.task(taskId), this.task(dependsOnTaskId)]);
+    if (dependency.archivedAt)
+      throw new DomainError(
+        'ARCHIVED_DEPENDENCY',
+        'Archived tasks cannot be added as dependencies',
+        409,
+      );
+    if (task.collectionId !== dependency.collectionId)
+      throw new DomainError(
+        'CROSS_COLLECTION_DEPENDENCY',
+        'Dependencies must belong to the same collection',
+        409,
+      );
     const edges = await this.database.select().from(taskDependencies);
+    if (edges.some((edge) => edge.taskId === taskId && edge.dependsOnTaskId === dependsOnTaskId))
+      throw new DomainError('DUPLICATE_DEPENDENCY', 'This dependency already exists', 409);
     assertAcyclic(taskId, dependsOnTaskId, edges);
     const [created] = await this.database
       .insert(taskDependencies)
@@ -534,8 +650,58 @@ export class WaymarkService {
       );
   }
 
-  private async assertTaskScope(collectionId: string, phaseId: string | null) {
-    const collection = await this.collection(collectionId);
+  private async dependenciesFor(taskId: string) {
+    const rows = await this.database
+      .select({ task: tasks })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId))
+      .where(eq(taskDependencies.taskId, taskId));
+    return rows.map((row) => row.task);
+  }
+
+  private async normalizeTaskScope(
+    database: TaskDatabase,
+    collectionId: string,
+    phaseId: string | null,
+    excludedId?: string,
+  ) {
+    const scope = await database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.collectionId, collectionId),
+          phaseId ? eq(tasks.phaseId, phaseId) : isNull(tasks.phaseId),
+          isNull(tasks.archivedAt),
+          excludedId ? ne(tasks.id, excludedId) : undefined,
+        ),
+      )
+      .orderBy(asc(tasks.position));
+    if (!scope.length) return;
+    await database
+      .update(tasks)
+      .set({ position: sql`${tasks.position} + 1000000` })
+      .where(
+        inArray(
+          tasks.id,
+          scope.map((item) => item.id),
+        ),
+      );
+    for (const [position, item] of scope.entries())
+      await database.update(tasks).set({ position, updatedAt: now() }).where(eq(tasks.id, item.id));
+  }
+
+  private async assertTaskScope(
+    collectionId: string,
+    phaseId: string | null,
+    database: TaskDatabase = this.database,
+  ) {
+    const [collection] = await database
+      .select()
+      .from(taskCollections)
+      .where(eq(taskCollections.id, collectionId));
+    if (!collection)
+      throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
     if (collection.structure === 'FLAT' && phaseId)
       throw new DomainError(
         'FLAT_TASK_PHASE',
@@ -543,7 +709,7 @@ export class WaymarkService {
         422,
       );
     if (phaseId) {
-      const [phase] = await this.database
+      const [phase] = await database
         .select()
         .from(phases)
         .where(and(eq(phases.id, phaseId), eq(phases.collectionId, collectionId)));

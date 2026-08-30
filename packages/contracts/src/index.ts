@@ -74,6 +74,17 @@ export const moveTaskSchema = z.object({
   phaseId: uuidSchema.nullable(),
   position: z.number().int().nonnegative(),
 });
+export const taskListQuerySchema = z.object({
+  collectionId: uuidSchema.optional(),
+  phaseId: uuidSchema.optional(),
+  unassigned: z.enum(['true', 'false']).optional(),
+  completed: z.enum(['true', 'false']).optional(),
+  waiting: z.enum(['true', 'false']).optional(),
+  urgency: urgencySchema.optional(),
+  dueBefore: dateSchema.optional(),
+  dueAfter: dateSchema.optional(),
+  includeArchived: z.enum(['true', 'false']).optional(),
+});
 export const dependencySchema = z.object({ dependsOnTaskId: uuidSchema });
 
 export type CollectionStructure = z.infer<typeof collectionStructureSchema>;

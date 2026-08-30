@@ -225,6 +225,122 @@ h1 i {
   color: #69747c;
   margin-top: 3px;
 }
+.section-title > .primary {
+  grid-column: 2;
+  grid-row: 1;
+}
+.task-list {
+  margin-top: 20px;
+}
+.date-group + .date-group {
+  margin-top: 34px;
+}
+.date-group > h2 {
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+.task-list article {
+  display: grid;
+  grid-template-columns: 32px 32px minmax(170px, 1fr) 100px 120px auto 40px;
+  gap: 10px;
+  align-items: center;
+  min-height: 60px;
+  border-bottom: 1px solid var(--line);
+}
+.task-name {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.task-name small {
+  color: #6a747c;
+}
+.task-moves {
+  display: flex;
+  flex-direction: column;
+}
+.task-moves button {
+  border: 0;
+  background: transparent;
+  padding: 2px;
+}
+.blocked-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 650;
+  color: #805b00;
+}
+.waiting-task {
+  box-shadow: inset 3px 0 #d4a017;
+  padding-left: 7px;
+}
+.task-inspector {
+  position: fixed;
+  z-index: 6;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(390px, 100vw);
+  overflow-y: auto;
+  padding: 28px;
+  background: #fbfbf8;
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 30px #0f172a24;
+}
+.inspector-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.task-inspector h2 {
+  margin: 10px 0 18px;
+}
+.task-inspector dl {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 9px;
+}
+.task-inspector dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.task-inspector hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 24px 0;
+}
+.dependency-list {
+  list-style: none;
+  padding: 0;
+}
+.dependency-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+}
+.dependency-list span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dependency-add {
+  display: grid;
+  gap: 7px;
+}
+.dependency-add select {
+  padding: 9px;
+}
+.inspector-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 28px;
+}
 .phase-nav button {
   background: none;
   border: 0;
@@ -824,6 +940,15 @@ footer {
   font-size: 11px;
   letter-spacing: 0.04em;
 }
+.modal label > .field-label {
+  color: inherit;
+  font-size: inherit;
+  letter-spacing: normal;
+}
+.field-label b {
+  color: #a33b32;
+  font-weight: 800;
+}
 .modal form > label,
 .form-grid label {
   display: flex;
@@ -971,5 +1096,16 @@ footer {
   }
   .managed-phase {
     grid-template-columns: 32px minmax(0, 1fr) repeat(4, 32px);
+  }
+  .task-list article {
+    grid-template-columns: 28px 28px minmax(150px, 1fr) 90px;
+    min-width: 520px;
+  }
+  .task-list article > span:nth-of-type(n + 2) {
+    display: none;
+  }
+  .task-inspector {
+    top: 55px;
+    width: 100vw;
   }
 }

@@ -21,6 +21,24 @@ const phased = {
   structure: 'PHASED',
   position: 1,
 };
+const task = {
+  id: '33333333-3333-4333-8333-333333333333',
+  collectionId: phased.id,
+  phaseId: null,
+  name: 'Review launch',
+  description: null,
+  urgency: 'MEDIUM',
+  dueDate: null,
+  completedAt: null,
+  waitingReason: null,
+  position: 0,
+  createdAt: '2026-08-30T10:00:00.000Z',
+  updatedAt: '2026-08-30T10:00:00.000Z',
+  archivedAt: null,
+  dependencies: [],
+  blockedTasks: [],
+  isWaiting: false,
+};
 
 const response = (data: unknown) =>
   Promise.resolve(new Response(JSON.stringify({ data }), { status: 200 }));
@@ -34,6 +52,7 @@ function mockApi() {
       if (url.includes(`/collections/${flat.id}`)) return response(flat);
       if (url.includes(`/collections/${phased.id}/phases`)) return response([]);
       if (url.includes(`/collections/${phased.id}`)) return response(phased);
+      if (url.endsWith(`/tasks/${task.id}`)) return response(task);
       if (url.includes('/tasks?collectionId=')) return response([]);
       return Promise.resolve(new Response('{}', { status: 404 }));
     }),
@@ -91,5 +110,37 @@ describe('collection navigation', () => {
     document.body.append(element);
     await settle(element);
     expect(element.querySelector('#collection-title')?.textContent).toBe('Website Redesign');
+  });
+
+  it("shows the task's actual collection in the edit dialog", async () => {
+    history.replaceState({}, '', `/collections/${phased.id}/backlog?task=${task.id}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.endsWith(`/tasks/${task.id}`)) return response(task);
+        if (url.includes(`/tasks?collectionId=${phased.id}`)) return response([task]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('waymark-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    const edit = [...element.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Edit task'),
+    )!;
+    edit.click();
+    await settle(element);
+    const select = element.querySelector<HTMLSelectElement>('select[name="collectionId"]')!;
+    expect(select.value).toBe(phased.id);
+    expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Website Redesign');
+    expect(element.querySelector('dialog')?.textContent).not.toMatch(
+      /(?:Description|Due date|Waiting reason)\s*>/,
+    );
   });
 });

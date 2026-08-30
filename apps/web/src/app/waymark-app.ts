@@ -8,6 +8,7 @@ import {
   type Phase,
   type PhaseInput,
   type Task,
+  type TaskInput,
 } from '../services/api-client';
 
 type Route =
@@ -19,6 +20,9 @@ type Modal =
   | { kind: 'phases' }
   | { kind: 'phase-form'; phase?: Phase }
   | { kind: 'phase-delete'; phase: Phase }
+  | { kind: 'task-form'; task?: Task }
+  | { kind: 'task-archive'; task: Task }
+  | { kind: 'task-delete'; task: Task }
   | { kind: 'archive' | 'delete'; collection: Collection }
   | null;
 const lastKey = 'waymark:lastCollectionId';
@@ -50,6 +54,8 @@ export class WaymarkApp extends LitElement {
   @state() private selected: Collection | null = null;
   @state() private phases: Phase[] = [];
   @state() private tasks: Task[] = [];
+  @state() private taskDetail: Task | null = null;
+  @state() private archivedTasks: Task[] = [];
   @state() private route = readRoute();
   @state() private loading = true;
   @state() private error = '';
@@ -61,6 +67,7 @@ export class WaymarkApp extends LitElement {
   private loadId = 0;
   private draggedId: string | null = null;
   private draggedPhaseId: string | null = null;
+  private draggedTaskId: string | null = null;
   private returnFocus: HTMLElement | null = null;
 
   createRenderRoot() {
@@ -108,6 +115,7 @@ export class WaymarkApp extends LitElement {
     this.selected = null;
     this.phases = [];
     this.tasks = [];
+    this.taskDetail = null;
     try {
       if (this.route.kind === 'collection') {
         const collection = await api.collection(this.route.id);
@@ -138,10 +146,42 @@ export class WaymarkApp extends LitElement {
             if (target) localStorage.setItem(phaseKey(collection.id), target.id);
           }
         }
+        const taskId = new URLSearchParams(location.search).get('task');
+        if (taskId) {
+          const routePhaseId = this.route.phaseId;
+          const contextTasks =
+            collection.structure === 'FLAT'
+              ? tasks
+              : this.route.destination === 'phase'
+                ? tasks.filter((task) => task.phaseId === routePhaseId)
+                : tasks.filter((task) => !task.phaseId);
+          if (contextTasks.some((task) => task.id === taskId))
+            this.taskDetail = await api.task(taskId);
+        }
       } else if (this.route.kind === 'archived') {
-        const all = await api.collections(true);
+        const [all, archivedTasks] = await Promise.all([
+          api.collections(true),
+          api.tasks({ includeArchived: true }),
+        ]);
         if (token !== this.loadId) return;
         this.archived = all.filter((item) => item.status === 'ARCHIVED');
+        this.archivedTasks = archivedTasks.filter((task) => task.archivedAt !== null);
+      } else if (
+        this.route.kind === 'today' ||
+        this.route.kind === 'upcoming' ||
+        this.route.kind === 'done'
+      ) {
+        const today = new Date().toLocaleDateString('en-CA');
+        this.tasks = await api.tasks(
+          this.route.kind === 'today'
+            ? { completed: false, dueBefore: today }
+            : this.route.kind === 'upcoming'
+              ? { completed: false, dueAfter: today }
+              : { completed: true },
+        );
+        const taskId = new URLSearchParams(location.search).get('task');
+        if (taskId && this.tasks.some((task) => task.id === taskId))
+          this.taskDetail = await api.task(taskId);
       }
     } catch (error) {
       if (token === this.loadId) this.fail(error);
@@ -426,6 +466,193 @@ export class WaymarkApp extends LitElement {
     }
   }
 
+  private taskContextPhase() {
+    return this.selected?.structure === 'PHASED' &&
+      this.route.kind === 'collection' &&
+      this.route.destination === 'phase'
+      ? (this.route.phaseId ?? null)
+      : null;
+  }
+  private selectTask(task: Task) {
+    const query = new URLSearchParams(location.search);
+    query.set('task', task.id);
+    history.pushState({}, '', `${location.pathname}?${query}`);
+    void api
+      .task(task.id)
+      .then((detail) => {
+        this.taskDetail = detail;
+        void this.updateComplete.then(() =>
+          document.querySelector<HTMLElement>('#task-inspector-title')?.focus(),
+        );
+      })
+      .catch((error) => this.fail(error));
+  }
+  private closeTask = () => {
+    const query = new URLSearchParams(location.search);
+    query.delete('task');
+    history.pushState({}, '', `${location.pathname}${query.size ? `?${query}` : ''}`);
+    this.taskDetail = null;
+  };
+  private async reloadTasks() {
+    if (this.route.kind === 'collection' && this.selected) {
+      [this.tasks, this.phases, this.selected] = await Promise.all([
+        api.tasks(this.selected.id),
+        this.selected.structure === 'PHASED' ? api.phases(this.selected.id) : Promise.resolve([]),
+        api.collection(this.selected.id),
+      ]);
+    } else await this.loadRoute();
+  }
+  private taskInput(form: HTMLFormElement, existing?: Task): TaskInput | null {
+    const data = new FormData(form),
+      name = String(data.get('name') ?? '').trim();
+    if (!name) {
+      this.errors = { name: 'Enter a task name.' };
+      void this.updateComplete.then(() => form.querySelector<HTMLElement>('[name=name]')?.focus());
+      return null;
+    }
+    const collectionId = String(
+      data.get('collectionId') ?? existing?.collectionId ?? this.selected?.id ?? '',
+    );
+    return {
+      collectionId,
+      phaseId: String(data.get('phaseId') ?? '') || null,
+      name,
+      description: String(data.get('description') ?? '').trim() || null,
+      urgency: String(data.get('urgency') ?? 'MEDIUM') as Task['urgency'],
+      dueDate: String(data.get('dueDate') ?? '') || null,
+      waitingReason: String(data.get('waitingReason') ?? '').trim() || null,
+    };
+  }
+  private async saveTask(event: SubmitEvent) {
+    event.preventDefault();
+    if (this.submitting || this.modal?.kind !== 'task-form') return;
+    const existing = this.modal.task,
+      input = this.taskInput(event.currentTarget as HTMLFormElement, existing);
+    if (!input) return;
+    this.submitting = true;
+    try {
+      let saved: Task;
+      if (existing) {
+        const oldPhase = existing.phaseId;
+        saved = await api.updateTask(existing.id, {
+          name: input.name,
+          description: input.description,
+          urgency: input.urgency,
+          dueDate: input.dueDate,
+          waitingReason: input.waitingReason,
+        });
+        if (oldPhase !== input.phaseId)
+          saved = await api.moveTask(
+            existing.id,
+            input.phaseId,
+            this.tasks.filter((task) => task.phaseId === input.phaseId && !task.archivedAt).length,
+          );
+      } else saved = await api.createTask(input);
+      this.modal = null;
+      this.notice = existing ? 'Task updated.' : 'Task created.';
+      await this.reloadTasks();
+      this.selectTask(saved);
+    } catch (error) {
+      this.errors = { form: error instanceof Error ? error.message : 'Could not save task.' };
+    } finally {
+      this.submitting = false;
+    }
+  }
+  private async toggleTask(task: Task) {
+    const previous = [...this.tasks];
+    this.tasks = this.tasks.map((item) =>
+      item.id === task.id
+        ? { ...item, completedAt: task.completedAt ? null : new Date().toISOString() }
+        : item,
+    );
+    try {
+      const updated = await api.completeTask(task.id, Boolean(task.completedAt));
+      this.notice = updated.completedAt ? `${task.name} completed.` : `${task.name} reopened.`;
+      await this.reloadTasks();
+      if (this.taskDetail?.id === task.id) this.taskDetail = await api.task(task.id);
+    } catch (error) {
+      this.tasks = previous;
+      this.notice = error instanceof Error ? error.message : 'Could not update task.';
+    }
+  }
+  private async archiveTask() {
+    if (this.modal?.kind !== 'task-archive') return;
+    this.submitting = true;
+    try {
+      const task = this.modal.task;
+      await api.archiveTask(task.id);
+      this.modal = null;
+      this.closeTask();
+      await this.reloadTasks();
+      this.notice = `${task.name} archived.`;
+    } catch (error) {
+      this.errors = { form: error instanceof Error ? error.message : 'Could not archive task.' };
+    } finally {
+      this.submitting = false;
+    }
+  }
+  private async restoreTask(task: Task) {
+    try {
+      await api.archiveTask(task.id, true);
+      this.notice = `${task.name} restored.`;
+      await this.loadRoute();
+    } catch (error) {
+      this.notice = error instanceof Error ? error.message : 'Could not restore task.';
+    }
+  }
+  private async deleteArchivedTask() {
+    if (this.modal?.kind !== 'task-delete') return;
+    this.submitting = true;
+    try {
+      const task = this.modal.task;
+      await api.deleteTask(task.id);
+      this.modal = null;
+      this.notice = `${task.name} permanently deleted.`;
+      await this.loadRoute();
+    } catch (error) {
+      this.errors = { form: error instanceof Error ? error.message : 'Could not delete task.' };
+    } finally {
+      this.submitting = false;
+    }
+  }
+  private async persistTaskOrder(next: Task[], previous: Task[], moved: Task) {
+    const positions = new Map(next.map((task, position) => [task.id, position]));
+    this.tasks = this.tasks.map((task) =>
+      positions.has(task.id) ? { ...task, position: positions.get(task.id)! } : task,
+    );
+    try {
+      await api.reorderTasks(next.map((task) => task.id));
+      this.notice = `Moved ${moved.name} to position ${next.indexOf(moved) + 1}.`;
+      void this.updateComplete.then(() =>
+        document.querySelector<HTMLElement>(`[data-task-id="${moved.id}"]`)?.focus(),
+      );
+    } catch (error) {
+      this.tasks = previous;
+      this.notice = error instanceof Error ? error.message : 'Could not reorder tasks.';
+    }
+  }
+  private moveTaskOrder(id: string, delta: number, scope: Task[]) {
+    const from = scope.findIndex((task) => task.id === id),
+      to = from + delta;
+    if (from < 0 || to < 0 || to >= scope.length) return;
+    const previous = [...this.tasks],
+      next = [...scope];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    void this.persistTaskOrder(next, previous, next[to]!);
+  }
+  private dropTask(targetId: string, scope: Task[]) {
+    if (!this.draggedTaskId || this.draggedTaskId === targetId) return;
+    const previous = [...this.tasks],
+      next = [...scope],
+      from = next.findIndex((task) => task.id === this.draggedTaskId),
+      to = next.findIndex((task) => task.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
+    this.draggedTaskId = null;
+    void this.persistTaskOrder(next, previous, moved!);
+  }
+
   private sidebar() {
     return html`<aside class="sidebar">
       <div class="brand">Waymark<span>.</span></div>
@@ -607,19 +834,79 @@ export class WaymarkApp extends LitElement {
     return html`<section class="workspace">
       <div class="section-title">
         <h2>Tasks <span>${this.tasks.length}</span></h2>
+        <button
+          class="primary"
+          @click=${(event: MouseEvent) => this.openModal({ kind: 'task-form' }, event.currentTarget as HTMLElement)}
+        >
+          <i class="ph ph-plus"></i>Add task
+        </button>
       </div>
       ${
         this.tasks.length
-          ? html`<div class="simple-list">
-              ${this.tasks.map((task) => html`<div><i class=${task.completedAt ? 'ph ph-check-circle' : 'ph ph-circle'}></i><strong>${task.name}</strong>${task.dueDate ? html`<span>${task.dueDate}</span>` : nothing}</div>`)}
-            </div>`
+          ? this.taskList(this.tasks)
           : html`<div class="inline-empty">
               <i class="ph ph-list-checks"></i>
               <h3>No tasks yet</h3>
-              <p>Task editing will be added in a later pass.</p>
+              <p>Add the first task to this collection.</p>
             </div>`
       }
     </section>`;
+  }
+  private taskList(scope: Task[], contextual = false) {
+    return html`<div class="task-list">
+      ${scope.map((task, index) => {
+        const collection = this.collections.find((item) => item.id === task.collectionId),
+          phase = this.phases.find((item) => item.id === task.phaseId);
+        return html`<article
+          class=${task.isWaiting || task.waitingReason ? 'waiting-task' : ''}
+          draggable=${!contextual}
+          @dragstart=${() => (this.draggedTaskId = task.id)}
+          @dragover=${(event: DragEvent) => event.preventDefault()}
+          @drop=${() => this.dropTask(task.id, scope)}
+        >
+          <button
+            class="drag"
+            data-task-id=${task.id}
+            aria-label=${`Drag ${task.name}`}
+            @keydown=${(event: KeyboardEvent) => {
+              if (event.altKey && event.key === 'ArrowUp') this.moveTaskOrder(task.id, -1, scope);
+              if (event.altKey && event.key === 'ArrowDown') this.moveTaskOrder(task.id, 1, scope);
+            }}
+          >
+            <i class="ph ph-dots-six-vertical"></i></button
+          ><button
+            class=${`check ${task.completedAt ? 'done' : ''}`}
+            aria-label=${task.completedAt ? `Reopen ${task.name}` : `Complete ${task.name}`}
+            @click=${() => this.toggleTask(task)}
+          >
+            <i class="ph ph-check"></i></button
+          ><button class="task-name" @click=${() => this.selectTask(task)}>
+            <strong class=${task.completedAt ? 'struck' : ''}>${task.name}</strong
+            >${contextual ? html`<small>${collection?.name ?? 'Collection'} · ${phase?.name ?? (collection?.structure === 'PHASED' ? 'Backlog' : 'Task list')}</small>` : nothing}</button
+          ><span class=${`urgency ${task.urgency.toLowerCase()}`}
+            ><i></i>${task.urgency.toLowerCase()}</span
+          ><span>${task.dueDate ?? 'No due date'}</span
+          >${task.isWaiting || task.waitingReason ? html`<span class="blocked-label"><i class="ph ph-pause-circle"></i>Waiting</span>` : nothing}${
+            !contextual
+              ? html`<span class="task-moves"
+                  ><button
+                    aria-label=${`Move ${task.name} up`}
+                    ?disabled=${index === 0}
+                    @click=${() => this.moveTaskOrder(task.id, -1, scope)}
+                  >
+                    <i class="ph ph-caret-up"></i></button
+                  ><button
+                    aria-label=${`Move ${task.name} down`}
+                    ?disabled=${index === scope.length - 1}
+                    @click=${() => this.moveTaskOrder(task.id, 1, scope)}
+                  >
+                    <i class="ph ph-caret-down"></i></button
+                ></span>`
+              : nothing
+          }
+        </article>`;
+      })}
+    </div>`;
   }
   private phasedView() {
     const phaseId = this.route.kind === 'collection' ? this.route.phaseId : undefined;
@@ -686,12 +973,16 @@ export class WaymarkApp extends LitElement {
               <div class="phase-content">
                 <div class="section-title">
                   <h2>${selected?.name ?? 'Backlog'} <span>${visibleTasks.length}</span></h2>
+                  <button
+                    class="primary"
+                    @click=${(event: MouseEvent) => this.openModal({ kind: 'task-form' }, event.currentTarget as HTMLElement)}
+                  >
+                    <i class="ph ph-plus"></i>Add task
+                  </button>
                 </div>
                 ${
                   visibleTasks.length
-                    ? html`<div class="simple-list">
-                        ${visibleTasks.map((task) => html`<div><i class=${task.completedAt ? 'ph ph-check-circle' : 'ph ph-circle'}></i><strong>${task.name}</strong>${task.dueDate ? html`<span>${task.dueDate}</span>` : nothing}</div>`)}
-                      </div>`
+                    ? this.taskList(visibleTasks)
                     : html`<div class="inline-empty">
                         <i class=${selected ? 'ph ph-stack' : 'ph ph-tray'}></i>
                         <h3>No tasks yet</h3>
@@ -793,6 +1084,45 @@ export class WaymarkApp extends LitElement {
               </div>`
         }
       </section>
+      <section class="workspace archived-list">
+        <div class="section-title">
+          <h2>Archived tasks <span>${this.archivedTasks.length}</span></h2>
+        </div>
+        ${
+          this.archivedTasks.length
+            ? this.archivedTasks.map(
+                (task) =>
+                  html`<article>
+                    <i class="ph ph-check-square-offset"></i>
+                    <div>
+                      <h2>${task.name}</h2>
+                      <p>
+                        ${this.collections.find((item) => item.id === task.collectionId)?.name ?? 'Collection'}
+                      </p>
+                    </div>
+                    <button class="outline" @click=${() => this.restoreTask(task)}>
+                      <i class="ph ph-arrow-counter-clockwise"></i>Restore task</button
+                    ><button
+                      class="danger-text-button"
+                      @click=${async (event: MouseEvent) => {
+                        try {
+                          this.openModal(
+                            { kind: 'task-delete', task: await api.task(task.id) },
+                            event.currentTarget as HTMLElement,
+                          );
+                        } catch (error) {
+                          this.notice =
+                            error instanceof Error ? error.message : 'Could not load task details.';
+                        }
+                      }}
+                    >
+                      <i class="ph ph-trash"></i>Permanently delete
+                    </button>
+                  </article>`,
+              )
+            : html`<p>No archived tasks.</p>`
+        }
+      </section>
     </main>`;
   }
   private utilityView() {
@@ -803,15 +1133,41 @@ export class WaymarkApp extends LitElement {
         <div>
           <small>FOCUS</small>
           <h1>${title}</h1>
-          <p>Task-focused views remain unchanged in this collection management pass.</p>
+          <p>
+            ${this.route.kind === 'today' ? 'Overdue tasks first, followed by tasks due today.' : this.route.kind === 'upcoming' ? 'Incomplete tasks grouped by their future due date.' : 'Recently completed tasks, newest first.'}
+          </p>
         </div>
+        ${this.route.kind === 'today' ? html`<button class="primary" @click=${(event: MouseEvent) => this.openModal({ kind: 'task-form' }, event.currentTarget as HTMLElement)}><i class="ph ph-plus"></i>Add task</button>` : nothing}
       </header>
       <section class="workspace">
-        <div class="inline-empty">
-          <i class="ph ph-clock"></i>
-          <h2>${title}</h2>
-          <p>Select a collection from the sidebar to manage its context.</p>
-        </div>
+        ${
+          this.tasks.length
+            ? this.route.kind === 'upcoming'
+              ? [...new Set(this.tasks.map((task) => task.dueDate!))].map(
+                  (date) =>
+                    html`<section class="date-group">
+                      <h2>
+                        ${new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+                          weekday: 'long',
+                          month: 'long',
+                          day: 'numeric',
+                        })}
+                      </h2>
+                      ${this.taskList(
+                        this.tasks.filter((task) => task.dueDate === date),
+                        true,
+                      )}
+                    </section>`,
+                )
+              : this.taskList(this.tasks, true)
+            : html`<div class="inline-empty">
+                <i class="ph ph-clock"></i>
+                <h2>No ${title.toLowerCase()} tasks</h2>
+                <p>
+                  ${this.route.kind === 'done' ? 'Completed tasks will appear here.' : 'Nothing needs your attention in this view.'}
+                </p>
+              </div>`
+        }
       </section>
     </main>`;
   }
@@ -839,10 +1195,11 @@ export class WaymarkApp extends LitElement {
           </button>
         </div>
         ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}<label
-          >Name <span>Required</span><input name="name" .value=${collection?.name ?? ''} /></label
+          ><span class="field-label">Name <b aria-hidden="true">*</b></span
+          ><input name="name" required .value=${collection?.name ?? ''} /></label
         >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
-          >Description <span>Optional</span
-          ><textarea name="description" rows="3">${collection?.description ?? ''}</textarea>
+          >Description<textarea name="description" rows="3">
+${collection?.description ?? ''}</textarea>
         </label>
         <fieldset>
           <legend>Organization</legend>
@@ -870,11 +1227,12 @@ export class WaymarkApp extends LitElement {
         </fieldset>
         <div class="form-grid">
           <label
-            >Start date <span>Optional</span
-            ><input type="date" name="startDate" .value=${collection?.startDate ?? ''} /></label
+            >Start date<input
+              type="date"
+              name="startDate"
+              .value=${collection?.startDate ?? ''} /></label
           ><label
-            >Target end date <span>Optional</span
-            ><input
+            >Target end date<input
               type="date"
               name="targetEndDate"
               .value=${collection?.targetEndDate ?? ''}
@@ -1033,18 +1391,19 @@ export class WaymarkApp extends LitElement {
           </button>
         </div>
         ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}<label
-          >Name <span>Required</span><input name="name" .value=${phase?.name ?? ''} /></label
+          ><span class="field-label">Name <b aria-hidden="true">*</b></span
+          ><input name="name" required .value=${phase?.name ?? ''} /></label
         >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
-          >Description <span>Optional</span
-          ><textarea name="description" rows="3">${phase?.description ?? ''}</textarea>
+          >Description<textarea name="description" rows="3">${phase?.description ?? ''}</textarea>
         </label>
         <div class="form-grid">
           <label
-            >Start date <span>Optional</span
-            ><input name="startDate" type="date" .value=${phase?.startDate ?? ''} /></label
+            >Start date<input
+              name="startDate"
+              type="date"
+              .value=${phase?.startDate ?? ''} /></label
           ><label
-            >Target end date <span>Optional</span
-            ><input
+            >Target end date<input
               name="targetEndDate"
               type="date"
               .value=${phase?.targetEndDate ?? ''}
@@ -1080,6 +1439,252 @@ export class WaymarkApp extends LitElement {
       </div>
     </dialog>`;
   }
+  private taskFormModal(task?: Task) {
+    const collectionId = task?.collectionId ?? this.selected?.id ?? this.collections[0]?.id ?? '';
+    const collection = this.collections.find((item) => item.id === collectionId);
+    const phaseId = task?.phaseId ?? this.taskContextPhase();
+    return html`<dialog
+      class="modal"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      @keydown=${this.trap}
+    >
+      <form @submit=${this.saveTask} novalidate>
+        <div class="modal-heading">
+          <div>
+            <small>TASK</small>
+            <h2 id="modal-title">${task ? 'Edit task' : 'New task'}</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Close dialog"
+            @click=${this.closeModal}
+          >
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+        ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}<label
+          ><span class="field-label">Name <b aria-hidden="true">*</b></span
+          ><input name="name" required .value=${task?.name ?? ''} /></label
+        >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
+          >Description<textarea
+            name="description"
+            rows="3"
+            .value=${task?.description ?? ''}
+          ></textarea></label
+        ><label
+          ><span class="field-label">Collection <b aria-hidden="true">*</b></span
+          ><select name="collectionId" required ?disabled=${Boolean(task || this.selected)}>
+            ${this.collections.map(
+              (item) =>
+                html`<option value=${item.id} ?selected=${item.id === collectionId}>
+                  ${item.name}
+                </option>`,
+            )}
+          </select></label
+        >${
+          collection?.structure === 'PHASED'
+            ? html`<label
+                >Phase<select name="phaseId">
+                  <option value="" ?selected=${!phaseId}>Backlog</option>
+                  ${this.phases.map(
+                    (phase) =>
+                      html`<option value=${phase.id} ?selected=${phase.id === phaseId}>
+                        ${phase.name}
+                      </option>`,
+                  )}
+                </select></label
+              >`
+            : html`<input type="hidden" name="phaseId" value="" />`
+        }
+        <div class="form-grid">
+          <label
+            >Urgency<select name="urgency" .value=${task?.urgency ?? 'MEDIUM'}>
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="CRITICAL">Critical</option>
+            </select></label
+          ><label>Due date<input type="date" name="dueDate" .value=${task?.dueDate ?? ''} /></label>
+        </div>
+        <label
+          >Waiting reason<input name="waitingReason" .value=${task?.waitingReason ?? ''}
+        /></label>
+        <div class="modal-actions">
+          <button type="button" class="outline" @click=${this.closeModal}>Cancel</button
+          ><button class="primary" ?disabled=${this.submitting}>
+            ${this.submitting ? 'Saving…' : task ? 'Save changes' : 'Create task'}
+          </button>
+        </div>
+      </form>
+    </dialog>`;
+  }
+  private taskArchiveModal(task: Task) {
+    return html`<dialog
+      class="modal confirmation"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      @keydown=${this.trap}
+    >
+      <div class="danger-icon"><i class="ph ph-archive"></i></div>
+      <h2 id="confirm-title">Archive ${task.name}?</h2>
+      <p>The task will leave active lists but can be restored from Archived collections.</p>
+      ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
+      <div class="modal-actions">
+        <button class="outline" @click=${this.closeModal}>Cancel</button
+        ><button class="danger" ?disabled=${this.submitting} @click=${this.archiveTask}>
+          ${this.submitting ? 'Archiving…' : 'Archive task'}
+        </button>
+      </div>
+    </dialog>`;
+  }
+  private taskDeleteModal(task: Task) {
+    const links = (task.dependencies?.length ?? 0) + (task.blockedTasks?.length ?? 0);
+    return html`<dialog
+      class="modal confirmation"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      @keydown=${this.trap}
+    >
+      <div class="danger-icon"><i class="ph ph-trash"></i></div>
+      <h2 id="confirm-title">Permanently delete ${task.name}?</h2>
+      <p>
+        This removes the archived task and ${links} dependency ${links === 1 ? 'link' : 'links'}.
+        This cannot be undone.
+      </p>
+      ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
+      <div class="modal-actions">
+        <button class="outline" @click=${this.closeModal}>Cancel</button
+        ><button class="danger" ?disabled=${this.submitting} @click=${this.deleteArchivedTask}>
+          ${this.submitting ? 'Deleting…' : 'Permanently delete'}
+        </button>
+      </div>
+    </dialog>`;
+  }
+  private taskInspector() {
+    const task = this.taskDetail;
+    if (!task) return nothing;
+    const collection = this.collections.find((item) => item.id === task.collectionId),
+      phase = this.phases.find((item) => item.id === task.phaseId);
+    const eligible = this.tasks.filter(
+      (item) =>
+        item.collectionId === task.collectionId &&
+        item.id !== task.id &&
+        !item.archivedAt &&
+        !task.dependencies?.some((dependency) => dependency.id === item.id),
+    );
+    return html`<aside class="task-inspector" aria-label="Task details">
+      <div class="inspector-heading">
+        <small>TASK</small
+        ><button class="icon-button" aria-label="Close task inspector" @click=${this.closeTask}>
+          <i class="ph ph-x"></i>
+        </button>
+      </div>
+      <h2 id="task-inspector-title" tabindex="-1">${task.name}</h2>
+      <button class="outline" @click=${() => this.toggleTask(task)}>
+        <i class=${task.completedAt ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check'}></i
+        >${task.completedAt ? 'Reopen task' : 'Mark complete'}
+      </button>
+      <p>${task.description ?? 'No description.'}</p>
+      <dl>
+        <dt>Collection</dt>
+        <dd>${collection?.name ?? 'Unknown'}</dd>
+        <dt>Location</dt>
+        <dd>${phase?.name ?? (collection?.structure === 'PHASED' ? 'Backlog' : 'Task list')}</dd>
+        <dt>Urgency</dt>
+        <dd>${task.urgency}</dd>
+        <dt>Due date</dt>
+        <dd>${task.dueDate ?? 'None'}</dd>
+        <dt>Waiting</dt>
+        <dd>${task.isWaiting ? (task.waitingReason ?? 'Blocked by a dependency') : 'No'}</dd>
+        <dt>Created</dt>
+        <dd>${new Date(task.createdAt).toLocaleString()}</dd>
+        <dt>Updated</dt>
+        <dd>${new Date(task.updatedAt).toLocaleString()}</dd>
+      </dl>
+      <hr />
+      <h3>Dependencies</h3>
+      ${
+        task.dependencies?.length
+          ? html`<ul class="dependency-list">
+              ${task.dependencies.map(
+                (dependency) =>
+                  html`<li>
+                    <span
+                      ><i
+                        class=${dependency.completedAt ? 'ph ph-check-circle' : 'ph ph-circle'}
+                      ></i
+                      >${dependency.name}</span
+                    ><button
+                      class="icon-button"
+                      aria-label=${`Remove ${dependency.name} dependency`}
+                      @click=${async () => {
+                        try {
+                          await api.removeDependency(task.id, dependency.id);
+                          this.taskDetail = await api.task(task.id);
+                          this.notice = 'Dependency removed.';
+                        } catch (error) {
+                          this.notice =
+                            error instanceof Error ? error.message : 'Could not remove dependency.';
+                        }
+                      }}
+                    >
+                      <i class="ph ph-x"></i>
+                    </button>
+                  </li>`,
+              )}
+            </ul>`
+          : html`<p>No dependencies.</p>`
+      }${
+        eligible.length
+          ? html`<label class="dependency-add"
+              >Add dependency<select id="dependency-choice">
+                <option value="">Choose a task</option>
+                ${eligible.map((item) => html`<option value=${item.id}>${item.name}</option>`)}</select
+              ><button
+                class="outline"
+                @click=${async () => {
+                  const id = document.querySelector<HTMLSelectElement>('#dependency-choice')?.value;
+                  if (!id) return;
+                  try {
+                    await api.addDependency(task.id, id);
+                    this.taskDetail = await api.task(task.id);
+                    this.notice = 'Dependency added.';
+                  } catch (error) {
+                    this.notice =
+                      error instanceof Error ? error.message : 'Could not add dependency.';
+                  }
+                }}
+              >
+                Add
+              </button></label
+            >`
+          : nothing
+      }
+      <h3>Tasks blocked by this task</h3>
+      ${
+        task.blockedTasks?.length
+          ? html`<ul>
+              ${task.blockedTasks.map((item) => html`<li>${item.name}</li>`)}
+            </ul>`
+          : html`<p>None.</p>`
+      }
+      <div class="inspector-actions">
+        <button
+          class="outline"
+          @click=${(event: MouseEvent) => this.openModal({ kind: 'task-form', task }, event.currentTarget as HTMLElement)}
+        >
+          <i class="ph ph-pencil-simple"></i>Edit task</button
+        ><button
+          class="danger-text-button"
+          @click=${(event: MouseEvent) => this.openModal({ kind: 'task-archive', task }, event.currentTarget as HTMLElement)}
+        >
+          <i class="ph ph-archive"></i>Archive task
+        </button>
+      </div>
+    </aside>`;
+  }
   render() {
     const content =
       this.route.kind === 'archived'
@@ -1088,7 +1693,8 @@ export class WaymarkApp extends LitElement {
           ? this.collectionView()
           : this.utilityView();
     return html`<div class="shell collection-shell">${this.sidebar()}${content}</div>
+      ${this.taskInspector()}
       <div class="sr-only" aria-live="polite">${this.notice}</div>
-      ${this.modal?.kind === 'form' ? this.formModal(this.modal.collection) : this.modal?.kind === 'archive' ? this.confirmModal(this.modal.collection, 'archive') : this.modal?.kind === 'delete' ? this.confirmModal(this.modal.collection, 'delete') : this.modal?.kind === 'phases' ? this.managePhasesModal() : this.modal?.kind === 'phase-form' ? this.phaseFormModal(this.modal.phase) : this.modal?.kind === 'phase-delete' ? this.phaseDeleteModal(this.modal.phase) : nothing}`;
+      ${this.modal?.kind === 'form' ? this.formModal(this.modal.collection) : this.modal?.kind === 'archive' ? this.confirmModal(this.modal.collection, 'archive') : this.modal?.kind === 'delete' ? this.confirmModal(this.modal.collection, 'delete') : this.modal?.kind === 'phases' ? this.managePhasesModal() : this.modal?.kind === 'phase-form' ? this.phaseFormModal(this.modal.phase) : this.modal?.kind === 'phase-delete' ? this.phaseDeleteModal(this.modal.phase) : this.modal?.kind === 'task-form' ? this.taskFormModal(this.modal.task) : this.modal?.kind === 'task-archive' ? this.taskArchiveModal(this.modal.task) : this.modal?.kind === 'task-delete' ? this.taskDeleteModal(this.modal.task) : nothing}`;
   }
 }

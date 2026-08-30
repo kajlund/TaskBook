@@ -29,11 +29,37 @@ export type Phase = {
 export type PhaseInput = Pick<Phase, 'name' | 'description' | 'startDate' | 'targetEndDate'>;
 export type Task = {
   id: string;
+  collectionId: string;
   name: string;
+  description: string | null;
   phaseId: string | null;
+  urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   completedAt: string | null;
   dueDate: string | null;
+  waitingReason: string | null;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  dependencies?: Task[];
+  blockedTasks?: Task[];
+  isWaiting?: boolean;
 };
+export type TaskInput = Pick<
+  Task,
+  'collectionId' | 'phaseId' | 'name' | 'description' | 'urgency' | 'dueDate' | 'waitingReason'
+>;
+export type TaskFilters = Partial<{
+  collectionId: string;
+  phaseId: string;
+  unassigned: boolean;
+  completed: boolean;
+  waiting: boolean;
+  urgency: Task['urgency'];
+  dueBefore: string;
+  dueAfter: string;
+  includeArchived: boolean;
+}>;
 export type CollectionInput = {
   name: string;
   description: string | null;
@@ -63,7 +89,40 @@ export const api = {
   collection: (id: string) => request<Collection>(`/collections/${id}`),
   phases: (id: string) => request<Phase[]>(`/collections/${id}/phases`),
   phase: (id: string) => request<Phase>(`/phases/${id}`),
-  tasks: (id: string) => request<Task[]>(`/tasks?collectionId=${encodeURIComponent(id)}`),
+  tasks: (filters: string | TaskFilters = {}) => {
+    const values: TaskFilters = typeof filters === 'string' ? { collectionId: filters } : filters;
+    const query = new URLSearchParams(
+      Object.entries(values)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    return request<Task[]>(`/tasks${query.size ? `?${query}` : ''}`);
+  },
+  task: (id: string) => request<Task>(`/tasks/${id}`),
+  createTask: (input: TaskInput) =>
+    request<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) }),
+  updateTask: (id: string, input: Partial<Omit<TaskInput, 'collectionId'>>) =>
+    request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  moveTask: (id: string, phaseId: string | null, position: number) =>
+    request<Task>(`/tasks/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ phaseId, position }),
+    }),
+  completeTask: (id: string, reopen = false) =>
+    request<Task>(`/tasks/${id}/${reopen ? 'reopen' : 'complete'}`, { method: 'POST' }),
+  archiveTask: (id: string, restore = false) =>
+    request<Task>(`/tasks/${id}/${restore ? 'restore' : 'archive'}`, { method: 'POST' }),
+  deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  reorderTasks: (orderedIds: string[]) =>
+    request('/tasks/reorder', { method: 'POST', body: JSON.stringify({ orderedIds }) }),
+  dependencies: (id: string) => request<Task[]>(`/tasks/${id}/dependencies`),
+  addDependency: (id: string, dependsOnTaskId: string) =>
+    request(`/tasks/${id}/dependencies`, {
+      method: 'POST',
+      body: JSON.stringify({ dependsOnTaskId }),
+    }),
+  removeDependency: (id: string, dependsOnTaskId: string) =>
+    request<void>(`/tasks/${id}/dependencies/${dependsOnTaskId}`, { method: 'DELETE' }),
   createCollection: (input: CollectionInput) =>
     request<Collection>('/collections', { method: 'POST', body: JSON.stringify(input) }),
   updateCollection: (id: string, input: Partial<CollectionInput>) =>

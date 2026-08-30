@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createCollectionSchema,
   createPhaseSchema,
+  createTaskSchema,
+  taskListQuerySchema,
   updateCollectionSchema,
 } from '@waymark/contracts';
 import { assertAcyclic } from '../src/domain/dependencies.js';
@@ -44,6 +46,35 @@ describe('domain rules', () => {
         targetEndDate: '2026-10-01',
       }),
     ).toThrow(/Target end date/);
+  });
+  it('validates and normalizes task inputs', () => {
+    const parsed = createTaskSchema.parse({
+      collectionId: '11111111-1111-4111-8111-111111111111',
+      name: '  Ship release  ',
+    });
+    expect(parsed.name).toBe('Ship release');
+    expect(parsed.urgency).toBe('MEDIUM');
+    expect(() =>
+      createTaskSchema.parse({
+        collectionId: '11111111-1111-4111-8111-111111111111',
+        name: '   ',
+      }),
+    ).toThrow();
+  });
+  it('validates combined task filters as calendar dates', () => {
+    expect(
+      taskListQuerySchema.parse({
+        completed: 'false',
+        urgency: 'HIGH',
+        dueBefore: '2026-08-30',
+        waiting: 'true',
+      }),
+    ).toEqual({
+      completed: 'false',
+      urgency: 'HIGH',
+      dueBefore: '2026-08-30',
+      waiting: 'true',
+    });
   });
   it('returns zero progress for no active tasks', () =>
     expect(calculateProgress([])).toEqual({ completed: 0, total: 0, ratio: 0 }));

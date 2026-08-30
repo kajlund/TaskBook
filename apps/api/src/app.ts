@@ -12,6 +12,8 @@ import {
   createTaskSchema,
   dependencySchema,
   reorderSchema,
+  moveTaskSchema,
+  taskListQuerySchema,
   updateCollectionSchema,
   updatePhaseSchema,
   updateTaskSchema,
@@ -102,18 +104,20 @@ app.post(
     ok(c, await service.reorderPhases(id(c, 'collectionId'), c.req.valid('json').orderedIds)),
 );
 
-app.get('/api/tasks', async (c) => {
-  const collectionId = c.req.query('collectionId'),
-    phaseId = c.req.query('phaseId'),
-    completed = c.req.query('completed');
+app.get('/api/tasks', zValidator('query', taskListQuerySchema), async (c) => {
+  const query = c.req.valid('query');
   return ok(
     c,
     await service.listTasks({
-      ...(collectionId && { collectionId }),
-      ...(phaseId && { phaseId }),
-      unassigned: c.req.query('unassigned') === 'true',
-      ...(completed !== undefined && { completed: completed === 'true' }),
-      includeArchived: c.req.query('includeArchived') === 'true',
+      ...(query.collectionId && { collectionId: query.collectionId }),
+      ...(query.phaseId && { phaseId: query.phaseId }),
+      unassigned: query.unassigned === 'true',
+      ...(query.completed !== undefined && { completed: query.completed === 'true' }),
+      ...(query.waiting !== undefined && { waiting: query.waiting === 'true' }),
+      ...(query.urgency && { urgency: query.urgency }),
+      ...(query.dueBefore && { dueBefore: query.dueBefore }),
+      ...(query.dueAfter && { dueAfter: query.dueAfter }),
+      includeArchived: query.includeArchived === 'true',
     }),
   );
 });
@@ -132,8 +136,8 @@ app.post('/api/tasks/reorder', zValidator('json', reorderSchema), async (c) =>
   ok(c, await service.reorderTasks(c.req.valid('json').orderedIds)),
 );
 
-app.post('/api/tasks/:taskId/move', async (c) => {
-  const body = await c.req.json<{ phaseId: string | null; position: number }>();
+app.post('/api/tasks/:taskId/move', zValidator('json', moveTaskSchema), async (c) => {
+  const body = c.req.valid('json');
   return ok(c, await service.moveTask(id(c, 'taskId'), body.phaseId, body.position));
 });
 
@@ -163,6 +167,10 @@ app.post('/api/tasks/:taskId/dependencies', zValidator('json', dependencySchema)
 
 app.delete('/api/tasks/:taskId/dependencies/:dependsOnTaskId', async (c) => {
   await service.removeDependency(id(c, 'taskId'), id(c, 'dependsOnTaskId'));
+  return c.body(null, 204);
+});
+app.delete('/api/tasks/:taskId', async (c) => {
+  await service.deleteTask(id(c, 'taskId'));
   return c.body(null, 204);
 });
 
