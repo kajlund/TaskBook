@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD CONSTRAINT "task_phase_same_collection_fk" FOREIGN KEY ("phase_id","collection_id") REFERENCES "public"."phases"("id","collection_id") ON DELETE cascade ON UPDATE no action;
