@@ -9,18 +9,32 @@ await db.transaction(async (tx) => {
     .insert(taskCollections)
     .values([
       {
+        name: 'Personal',
+        description: 'Personal priorities and everyday responsibilities',
+        structure: 'FLAT',
+        status: 'ACTIVE',
+        position: 0,
+      },
+      {
+        name: 'Work',
+        description: 'Focused work outside phased initiatives',
+        structure: 'FLAT',
+        status: 'ACTIVE',
+        position: 1,
+      },
+      {
         name: 'Personal Administration',
         description: 'Life admin and recurring paperwork',
         structure: 'FLAT',
         status: 'ACTIVE',
-        position: 0,
+        position: 2,
       },
       {
         name: 'Home Maintenance',
         description: 'Repairs and seasonal upkeep',
         structure: 'FLAT',
         status: 'ACTIVE',
-        position: 1,
+        position: 3,
       },
       {
         name: 'Website Redesign',
@@ -29,14 +43,14 @@ await db.transaction(async (tx) => {
         status: 'ACTIVE',
         startDate: '2026-08-17',
         targetEndDate: '2026-10-30',
-        position: 2,
+        position: 4,
       },
       {
         name: 'Replace Server Storage',
         description: 'Plan and execute a safe storage migration',
         structure: 'PHASED',
         status: 'PAUSED',
-        position: 3,
+        position: 5,
       },
     ])
     .returning();

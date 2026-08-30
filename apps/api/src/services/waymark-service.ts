@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import type {
@@ -21,10 +21,22 @@ const now = () => new Date();
 export class WaymarkService {
   constructor(private database: Database) {}
 
-  async collections() {
+  async collections(
+    filters: {
+      status?: 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
+      includeArchived?: boolean;
+    } = {},
+  ) {
     const rows = await this.database
       .select()
       .from(taskCollections)
+      .where(
+        filters.status
+          ? eq(taskCollections.status, filters.status)
+          : filters.includeArchived
+            ? undefined
+            : ne(taskCollections.status, 'ARCHIVED'),
+      )
       .orderBy(asc(taskCollections.position));
     return Promise.all(
       rows.map(async (collection) => ({
@@ -47,7 +59,30 @@ export class WaymarkService {
       .select()
       .from(tasks)
       .where(eq(tasks.collectionId, id));
-    return { ...collection, progress: calculateProgress(collectionTasks) };
+    const impacts = await this.database
+      .select({
+        phaseCount: sql<number>`count(distinct ${phases.id})::int`,
+        taskCount: sql<number>`count(distinct ${tasks.id})::int`,
+        dependencyCount: sql<number>`(count(distinct (${taskDependencies.taskId}, ${taskDependencies.dependsOnTaskId})) filter (where ${taskDependencies.taskId} is not null))::int`,
+      })
+      .from(taskCollections)
+      .leftJoin(phases, eq(phases.collectionId, taskCollections.id))
+      .leftJoin(tasks, eq(tasks.collectionId, taskCollections.id))
+      .leftJoin(
+        taskDependencies,
+        or(eq(taskDependencies.taskId, tasks.id), eq(taskDependencies.dependsOnTaskId, tasks.id)),
+      )
+      .where(eq(taskCollections.id, id));
+    const impact = impacts[0];
+    return {
+      ...collection,
+      progress: calculateProgress(collectionTasks),
+      deletionImpact: {
+        phases: impact?.phaseCount ?? 0,
+        tasks: impact?.taskCount ?? 0,
+        dependencyLinks: impact?.dependencyCount ?? 0,
+      },
+    };
   }
 
   async createCollection(input: z.infer<typeof createCollectionSchema>) {
@@ -63,22 +98,47 @@ export class WaymarkService {
   }
 
   async updateCollection(id: string, input: z.infer<typeof updateCollectionSchema>) {
-    await this.collection(id);
-    const values = {
-      ...input,
-      updatedAt: now(),
-      ...(input.status === 'COMPLETED'
-        ? { completedAt: now() }
-        : input.status
-          ? { completedAt: null }
-          : {}),
-    };
-    const [updated] = await this.database
-      .update(taskCollections)
-      .set(values)
-      .where(eq(taskCollections.id, id))
-      .returning();
-    return updated;
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      if (!existing)
+        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      const startDate = input.startDate === undefined ? existing.startDate : input.startDate;
+      const targetEndDate =
+        input.targetEndDate === undefined ? existing.targetEndDate : input.targetEndDate;
+      if (startDate && targetEndDate && targetEndDate < startDate)
+        throw new DomainError(
+          'INVALID_COLLECTION_DATES',
+          'Target end date cannot precede start date',
+          422,
+        );
+      if (existing.structure === 'PHASED' && input.structure === 'FLAT') {
+        const counts = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(phases)
+          .where(eq(phases.collectionId, id));
+        if ((counts[0]?.count ?? 0) > 0)
+          throw new DomainError(
+            'COLLECTION_HAS_PHASES',
+            'Remove all phases before converting this collection to a simple task list',
+            409,
+          );
+      }
+      const values = {
+        ...input,
+        updatedAt: now(),
+        ...(input.status === 'COMPLETED'
+          ? { completedAt: existing.completedAt ?? now() }
+          : input.status
+            ? { completedAt: null }
+            : {}),
+      };
+      const [updated] = await tx
+        .update(taskCollections)
+        .set(values)
+        .where(eq(taskCollections.id, id))
+        .returning();
+      return updated;
+    });
   }
 
   async reorderCollections(ids: string[]) {
@@ -106,7 +166,74 @@ export class WaymarkService {
   }
 
   async archiveCollection(id: string, restore = false) {
-    return this.updateCollection(id, { status: restore ? 'ACTIVE' : 'ARCHIVED' });
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      if (!existing)
+        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      if (restore) {
+        const counts = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(taskCollections)
+          .where(ne(taskCollections.status, 'ARCHIVED'));
+        const [restored] = await tx
+          .update(taskCollections)
+          .set({ status: 'ACTIVE', position: counts[0]?.count ?? 0, updatedAt: now() })
+          .where(eq(taskCollections.id, id))
+          .returning();
+        return restored;
+      }
+      const [archived] = await tx
+        .update(taskCollections)
+        .set({ status: 'ARCHIVED', updatedAt: now() })
+        .where(eq(taskCollections.id, id))
+        .returning();
+      const active = await tx
+        .select({ id: taskCollections.id })
+        .from(taskCollections)
+        .where(ne(taskCollections.status, 'ARCHIVED'))
+        .orderBy(asc(taskCollections.position));
+      await tx
+        .update(taskCollections)
+        .set({ position: sql`${taskCollections.position} + 1000000` })
+        .where(
+          inArray(
+            taskCollections.id,
+            active.map((item) => item.id),
+          ),
+        );
+      for (const [position, item] of active.entries())
+        await tx.update(taskCollections).set({ position }).where(eq(taskCollections.id, item.id));
+      return archived;
+    });
+  }
+
+  async deleteCollection(id: string) {
+    return this.database.transaction(async (tx) => {
+      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      if (!existing)
+        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      if (existing.status !== 'ARCHIVED')
+        throw new DomainError(
+          'COLLECTION_NOT_ARCHIVED',
+          'Only archived collections can be permanently deleted',
+          409,
+        );
+      const ownedTasks = await tx
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.collectionId, id));
+      const taskIds = ownedTasks.map((task) => task.id);
+      if (taskIds.length)
+        await tx
+          .delete(taskDependencies)
+          .where(
+            or(
+              inArray(taskDependencies.taskId, taskIds),
+              inArray(taskDependencies.dependsOnTaskId, taskIds),
+            ),
+          );
+      await tx.delete(taskCollections).where(eq(taskCollections.id, id));
+    });
   }
 
   async listPhases(collectionId: string) {

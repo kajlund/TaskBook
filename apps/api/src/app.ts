@@ -7,6 +7,7 @@ import { zValidator } from '@hono/zod-validator';
 
 import {
   createCollectionSchema,
+  collectionListQuerySchema,
   createPhaseSchema,
   createTaskSchema,
   dependencySchema,
@@ -42,7 +43,16 @@ app.use('*', async (c, next) => {
 const ok = <T>(c: any, data: T, status = 200) => c.json({ data }, status);
 const id = (c: any, key: string) => uuidSchema.parse(c.req.param(key));
 app.get('/api/health', (c) => ok(c, { status: 'ok' }));
-app.get('/api/collections', async (c) => ok(c, await service.collections()));
+app.get('/api/collections', zValidator('query', collectionListQuerySchema), async (c) => {
+  const query = c.req.valid('query');
+  return ok(
+    c,
+    await service.collections({
+      ...(query.status && { status: query.status }),
+      includeArchived: query.includeArchived === 'true',
+    }),
+  );
+});
 app.post('/api/collections', zValidator('json', createCollectionSchema), async (c) =>
   ok(c, await service.createCollection(c.req.valid('json')), 201),
 );
@@ -65,6 +75,10 @@ for (const [path, restore] of [
   app.post(`/api/collections/:collectionId/${path}`, async (c) =>
     ok(c, await service.archiveCollection(id(c, 'collectionId'), restore)),
   );
+app.delete('/api/collections/:collectionId', async (c) => {
+  await service.deleteCollection(id(c, 'collectionId'));
+  return c.body(null, 204);
+});
 app.get('/api/collections/:collectionId/phases', async (c) =>
   ok(c, await service.listPhases(id(c, 'collectionId'))),
 );

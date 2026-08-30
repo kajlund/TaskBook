@@ -36,8 +36,14 @@ export const createCollectionSchema = validSchedule({
 export const updateCollectionSchema = validSchedule({
   name: trimmedName.optional(),
   description: nullableText,
+  structure: collectionStructureSchema.optional(),
   status: collectionStatusSchema.optional(),
   ...schedule,
+});
+
+export const collectionListQuerySchema = z.object({
+  status: collectionStatusSchema.optional(),
+  includeArchived: z.enum(['true', 'false']).optional(),
 });
 
 export const createPhaseSchema = validSchedule({
