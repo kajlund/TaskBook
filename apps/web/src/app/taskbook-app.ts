@@ -633,9 +633,10 @@ export class TaskBookApp extends LitElement {
     }
   }
   private async persistTaskOrder(next: Task[], previous: Task[], moved: Task) {
-    const positions = new Map(next.map((task, position) => [task.id, position]));
+    const scopeIds = new Set(next.map((task) => task.id));
+    let scopeIndex = 0;
     this.tasks = this.tasks.map((task) =>
-      positions.has(task.id) ? { ...task, position: positions.get(task.id)! } : task,
+      scopeIds.has(task.id) ? { ...next[scopeIndex]!, position: scopeIndex++ } : task,
     );
     try {
       await api.reorderTasks(next.map((task) => task.id));

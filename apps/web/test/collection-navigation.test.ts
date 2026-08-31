@@ -39,6 +39,13 @@ const task = {
   blockedTasks: [],
   isWaiting: false,
 };
+const flatTask = { ...task, id: '55555555-5555-4555-8555-555555555555', collectionId: flat.id, name: 'First task' };
+const secondFlatTask = {
+  ...flatTask,
+  id: '66666666-6666-4666-8666-666666666666',
+  name: 'Second task',
+  position: 1,
+};
 const phase = {
   id: '44444444-4444-4444-8444-444444444444',
   collectionId: phased.id,
@@ -152,6 +159,62 @@ describe('collection navigation', () => {
     await settle(element);
     expect(localStorage.getItem(`taskbook:lastPhase:${phased.id}`)).toBe(phase.id);
     expect(localStorage.getItem(`waymark:lastPhase:${phased.id}`)).toBe(phase.id);
+  });
+
+  it('reorders rendered tasks immediately with the arrow controls', async () => {
+    history.replaceState({}, '', `/collections/${flat.id}`);
+    const fetchMock = vi.fn((input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith('/collections')) return response([flat, phased]);
+      if (url.includes(`/collections/${flat.id}`)) return response(flat);
+      if (url.includes(`/tasks?collectionId=${flat.id}`)) return response([flatTask, secondFlatTask]);
+      if (url.endsWith('/tasks/reorder')) return response([]);
+      return Promise.resolve(new Response('{}', { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    element.querySelector<HTMLButtonElement>(`[aria-label="Move ${flatTask.name} down"]`)!.click();
+    await settle(element);
+    expect([...element.querySelectorAll('.task-name strong')].map((node) => node.textContent)).toEqual([
+      secondFlatTask.name,
+      flatTask.name,
+    ]);
+    const reorderCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/tasks/reorder'))!;
+    expect(JSON.parse(String((reorderCall[1] as RequestInit).body))).toEqual({
+      orderedIds: [secondFlatTask.id, flatTask.id],
+    });
+  });
+
+  it('reorders rendered tasks immediately with drag and drop', async () => {
+    history.replaceState({}, '', `/collections/${flat.id}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${flat.id}`)) return response(flat);
+        if (url.includes(`/tasks?collectionId=${flat.id}`)) return response([flatTask, secondFlatTask]);
+        if (url.endsWith('/tasks/reorder')) return response([]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    const rows = element.querySelectorAll<HTMLElement>('.task-list article');
+    rows[0]!.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    rows[1]!.dispatchEvent(new Event('drop', { bubbles: true }));
+    await settle(element);
+    expect([...element.querySelectorAll('.task-name strong')].map((node) => node.textContent)).toEqual([
+      secondFlatTask.name,
+      flatTask.name,
+    ]);
   });
 
   it("shows the task's actual collection in the edit dialog", async () => {
