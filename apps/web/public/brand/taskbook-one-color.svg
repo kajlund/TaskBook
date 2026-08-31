@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TaskBook mark, one color">
+  <g fill="none" stroke="#0F172A" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M84 162 256 92l172 70-172 70L84 162Z"/>
+    <path d="M84 248 256 178l172 70-172 70L84 248Z"/>
+    <path d="M84 334 256 264l172 70-172 70L84 334Z"/>
+  </g>
+</svg>

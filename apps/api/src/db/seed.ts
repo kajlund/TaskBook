@@ -138,4 +138,4 @@ await db.transaction(async (tx) => {
     .values({ taskId: sitemap.id, dependsOnTaskId: architecture.id });
 });
 await pool.end();
-console.log('Waymark development data seeded');
+console.log('TaskBook development data seeded');

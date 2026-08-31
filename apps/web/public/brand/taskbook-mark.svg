@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">TaskBook mark</title>
+  <desc id="desc">Three ordered pages in golden, midnight and teal.</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M84 162 256 92l172 70-172 70L84 162Z" fill="#F2B01E" stroke="#D89A12" stroke-width="9"/>
+    <path d="M84 248 256 178l172 70-172 70L84 248Z" fill="#0F172A" stroke="#0F172A" stroke-width="9"/>
+    <path d="M84 334 256 264l172 70-172 70L84 334Z" fill="#0E9F8C" stroke="#087D70" stroke-width="9"/>
+    <path d="m135 141 121 49 121-49" stroke="#FFF4D6" stroke-width="9" opacity=".9"/>
+    <path d="m135 227 121 49 121-49" stroke="#536078" stroke-width="9" opacity=".72"/>
+    <path d="m135 313 121 49 121-49" stroke="#7ED8CC" stroke-width="9" opacity=".78"/>
+  </g>
+</svg>

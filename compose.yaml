@@ -1,4 +1,5 @@
 services:
+  # Waymark-derived database and volume identifiers are retained for data compatibility.
   postgres:
     image: postgres:17-alpine
     environment:

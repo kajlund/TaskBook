@@ -19,15 +19,15 @@ import {
   updatePhaseSchema,
   updateTaskSchema,
   uuidSchema,
-} from '@waymark/contracts';
+} from '@taskbook/contracts';
 import { db } from './db/client.js';
 import { DomainError } from './errors/domain-error.js';
-import { WaymarkService } from './services/waymark-service.js';
+import { TaskBookService } from './services/taskbook-service.js';
 import { env } from './config/env.js';
 
 type AppEnv = { Variables: { requestId: string } };
 const logger = pino();
-const service = new WaymarkService(db);
+const service = new TaskBookService(db);
 
 export const app = new Hono<AppEnv>();
 

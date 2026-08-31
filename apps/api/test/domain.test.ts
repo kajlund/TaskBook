@@ -5,7 +5,7 @@ import {
   createTaskSchema,
   taskListQuerySchema,
   updateCollectionSchema,
-} from '@waymark/contracts';
+} from '@taskbook/contracts';
 import { assertAcyclic } from '../src/domain/dependencies.js';
 import { calculateProgress, isPhaseComplete } from '../src/domain/progress.js';
 import { validateReorder } from '../src/domain/ordering.js';

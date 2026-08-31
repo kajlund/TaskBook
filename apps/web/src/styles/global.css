@@ -17,7 +17,7 @@
 body {
   margin: 0;
 }
-waymark-app {
+taskbook-app {
   display: block;
 }
 button,
@@ -40,13 +40,12 @@ button {
   background: #fbfaf6;
 }
 .brand {
-  font-size: 27px;
-  font-weight: 800;
-  color: var(--midnight);
   padding: 0 10px 32px;
 }
-.brand span {
-  color: var(--teal);
+.brand img {
+  display: block;
+  width: 168px;
+  height: auto;
 }
 nav {
   display: flex;

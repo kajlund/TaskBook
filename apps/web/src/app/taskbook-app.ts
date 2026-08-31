@@ -25,8 +25,22 @@ type Modal =
   | { kind: 'task-delete'; task: Task }
   | { kind: 'archive' | 'delete'; collection: Collection }
   | null;
-const lastKey = 'waymark:lastCollectionId';
-const phaseKey = (id: string) => `waymark:lastPhase:${id}`;
+const lastKey = 'taskbook:lastCollectionId';
+const legacyLastKey = 'waymark:lastCollectionId';
+const phaseKey = (id: string) => `taskbook:lastPhase:${id}`;
+const legacyPhaseKey = (id: string) => `waymark:lastPhase:${id}`;
+const readStoredSelection = (key: string, legacyKey: string) => {
+  const current = localStorage.getItem(key);
+  if (current !== null) return current;
+  const legacy = localStorage.getItem(legacyKey);
+  if (legacy === null) return null;
+  try {
+    localStorage.setItem(key, legacy);
+  } catch {
+    return legacy;
+  }
+  return localStorage.getItem(key) ?? legacy;
+};
 const readRoute = (): Route => {
   const phase = location.pathname.match(/^\/collections\/([^/]+)\/phases\/([^/]+)$/);
   if (phase?.[1] && phase[2])
@@ -47,8 +61,8 @@ const readRoute = (): Route => {
     : { kind: 'root' };
 };
 
-@customElement('waymark-app')
-export class WaymarkApp extends LitElement {
+@customElement('taskbook-app')
+export class TaskBookApp extends LitElement {
   @state() private collections: Collection[] = [];
   @state() private archived: Collection[] = [];
   @state() private selected: Collection | null = null;
@@ -90,7 +104,7 @@ export class WaymarkApp extends LitElement {
     try {
       this.collections = await api.collections();
       if (this.route.kind === 'root') {
-        const remembered = localStorage.getItem(lastKey);
+        const remembered = readStoredSelection(lastKey, legacyLastKey);
         const next = this.collections.find((item) => item.id === remembered) ?? this.collections[0];
         if (next) return this.navigate(`/collections/${next.id}`, true);
       }
@@ -131,7 +145,10 @@ export class WaymarkApp extends LitElement {
         localStorage.setItem(lastKey, collection.id);
         if (collection.structure === 'PHASED') {
           if (!this.route.destination) {
-            const remembered = localStorage.getItem(phaseKey(collection.id));
+            const remembered = readStoredSelection(
+              phaseKey(collection.id),
+              legacyPhaseKey(collection.id),
+            );
             const target = phases.find((phase) => phase.id === remembered) ?? phases[0];
             return this.navigate(
               target
@@ -655,7 +672,7 @@ export class WaymarkApp extends LitElement {
 
   private sidebar() {
     return html`<aside class="sidebar">
-      <div class="brand">Waymark<span>.</span></div>
+      <div class="brand"><img src="/brand/taskbook-horizontal.svg" alt="TaskBook"></div>
       <nav aria-label="Primary">
         ${(['today', 'upcoming', 'done'] as const).map(
           (name) =>

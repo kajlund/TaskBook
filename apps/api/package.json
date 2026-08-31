@@ -1,5 +1,5 @@
 {
-  "name": "@waymark/api",
+  "name": "@taskbook/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.1",
     "@hono/zod-validator": "^0.7.2",
-    "@waymark/contracts": "*",
+    "@taskbook/contracts": "*",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.5",
     "hono": "^4.9.6",

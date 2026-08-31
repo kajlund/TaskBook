@@ -1,5 +1,5 @@
 {
-  "name": "waymark",
+  "name": "taskbook",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,15 +11,15 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @waymark/api\" \"npm run dev -w @waymark/web\"",
-    "start": "npm run start -w @waymark/api",
+    "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @taskbook/api\" \"npm run dev -w @taskbook/web\"",
+    "start": "npm run start -w @taskbook/api",
     "build": "npm run build -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
     "test": "npm test -ws --if-present",
     "db:start": "docker compose up -d postgres",
     "db:stop": "docker compose down",
-    "db:migrate": "npm run db:migrate -w @waymark/api",
-    "db:seed": "npm run db:seed -w @waymark/api",
+    "db:migrate": "npm run db:migrate -w @taskbook/api",
+    "db:seed": "npm run db:seed -w @taskbook/api",
     "format": "prettier --write \"apps/**/*.{ts,css}\" \"packages/**/*.ts\" \"{apps,packages}/**/*.json\" \"*.json\"",
     "format:check": "prettier --check \"apps/**/*.{ts,css}\" \"packages/**/*.ts\" \"{apps,packages}/**/*.json\" \"*.json\""
   },

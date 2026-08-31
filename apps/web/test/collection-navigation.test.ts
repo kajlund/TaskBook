@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import '../src/app/waymark-app';
+import '../src/app/taskbook-app';
 
 const flat = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -38,6 +38,14 @@ const task = {
   dependencies: [],
   blockedTasks: [],
   isWaiting: false,
+};
+const phase = {
+  id: '44444444-4444-4444-8444-444444444444',
+  collectionId: phased.id,
+  name: 'Planning',
+  description: null,
+  position: 0,
+  progress: { completed: 0, total: 0, ratio: 0 },
 };
 
 const response = (data: unknown) =>
@@ -77,7 +85,7 @@ describe('collection navigation', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('renders API collections without legacy Groups or Projects sections', async () => {
-    const element = document.createElement('waymark-app') as HTMLElement & {
+    const element = document.createElement('taskbook-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
     document.body.append(element);
@@ -89,7 +97,7 @@ describe('collection navigation', () => {
   });
 
   it('selecting a collection changes the URL and rendered context', async () => {
-    const element = document.createElement('waymark-app') as HTMLElement & {
+    const element = document.createElement('taskbook-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
     document.body.append(element);
@@ -104,12 +112,46 @@ describe('collection navigation', () => {
 
   it('restores a collection context from a direct URL', async () => {
     history.replaceState({}, '', `/collections/${phased.id}`);
-    const element = document.createElement('waymark-app') as HTMLElement & {
+    const element = document.createElement('taskbook-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
     document.body.append(element);
     await settle(element);
     expect(element.querySelector('#collection-title')?.textContent).toBe('Website Redesign');
+  });
+
+  it('migrates the legacy collection selection without deleting it', async () => {
+    localStorage.setItem('waymark:lastCollectionId', phased.id);
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    expect(localStorage.getItem('taskbook:lastCollectionId')).toBe(phased.id);
+    expect(localStorage.getItem('waymark:lastCollectionId')).toBe(phased.id);
+  });
+
+  it('migrates the legacy phase selection without deleting it', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}`);
+    localStorage.setItem(`waymark:lastPhase:${phased.id}`, phase.id);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([phase]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.includes('/tasks?collectionId=')) return response([]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    expect(localStorage.getItem(`taskbook:lastPhase:${phased.id}`)).toBe(phase.id);
+    expect(localStorage.getItem(`waymark:lastPhase:${phased.id}`)).toBe(phase.id);
   });
 
   it("shows the task's actual collection in the edit dialog", async () => {
@@ -126,7 +168,7 @@ describe('collection navigation', () => {
         return Promise.resolve(new Response('{}', { status: 404 }));
       }),
     );
-    const element = document.createElement('waymark-app') as HTMLElement & {
+    const element = document.createElement('taskbook-app') as HTMLElement & {
       updateComplete: Promise<unknown>;
     };
     document.body.append(element);

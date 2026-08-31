@@ -8,7 +8,7 @@ import type {
   updateCollectionSchema,
   updatePhaseSchema,
   updateTaskSchema,
-} from '@waymark/contracts';
+} from '@taskbook/contracts';
 import type { Database } from '../db/client.js';
 import { phases, taskCollections, taskDependencies, tasks } from '../db/schema/index.js';
 import { assertAcyclic } from '../domain/dependencies.js';
@@ -19,7 +19,7 @@ import { DomainError } from '../errors/domain-error.js';
 const now = () => new Date();
 type TaskDatabase = Pick<Database, 'select' | 'update'>;
 
-export class WaymarkService {
+export class TaskBookService {
   constructor(private database: Database) {}
 
   async collections(

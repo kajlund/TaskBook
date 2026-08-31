@@ -1,6 +1,6 @@
-# Waymark
+# TaskBook
 
-Waymark is a personal task manager for ordered flat and phased task collections. It uses a Lit/Vite frontend, a Web-standard Hono API, PostgreSQL, Drizzle ORM, shared Zod contracts, and npm workspaces.
+TaskBook is a personal task manager for ordered flat and phased task collections. It uses a Lit/Vite frontend, a Web-standard Hono API, PostgreSQL, Drizzle ORM, shared Zod contracts, and npm workspaces.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ npm run typecheck
 npm run build
 ```
 
-Database schema changes are generated with `npm run db:generate -w @waymark/api` and applied with `npm run db:migrate`.
+Database schema changes are generated with `npm run db:generate -w @taskbook/api` and applied with `npm run db:migrate`.
 
 ## Architecture
 
