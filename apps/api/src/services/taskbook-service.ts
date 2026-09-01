@@ -5,6 +5,7 @@ import type {
   createCollectionSchema,
   createPhaseSchema,
   createTaskSchema,
+  moveTaskSchema,
   updateCollectionSchema,
   updatePhaseSchema,
   updateTaskSchema,
@@ -436,16 +437,11 @@ export class TaskBookService {
     const existing = await this.task(id);
     if (input.phaseId !== undefined && input.phaseId !== existing.phaseId) {
       const { phaseId, ...details } = input;
-      if (Object.keys(details).length)
-        await this.database
-          .update(tasks)
-          .set({ ...details, updatedAt: now() })
-          .where(eq(tasks.id, id));
-      const destination = await this.listTasks({
-        collectionId: existing.collectionId,
-        ...(phaseId ? { phaseId } : { unassigned: true }),
+      return this.moveTask(id, {
+        destinationCollectionId: existing.collectionId,
+        destinationPhaseId: phaseId,
+        ...details,
       });
-      return this.moveTask(id, phaseId, destination.length);
     }
     const [updated] = await this.database
       .update(tasks)
@@ -491,46 +487,100 @@ export class TaskBookService {
     });
   }
 
-  async moveTask(id: string, phaseId: string | null, position: number) {
-    return this.database.transaction(async (tx) => {
-      const [task] = await tx.select().from(tasks).where(eq(tasks.id, id));
+  async moveTask(id: string, input: z.infer<typeof moveTaskSchema>) {
+    await this.database.transaction(async (tx) => {
+      const [task] = await tx.select().from(tasks).where(eq(tasks.id, id)).for('update');
       if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
-      await this.assertTaskScope(task.collectionId, phaseId, tx);
-      const sameScope = task.phaseId === phaseId;
-      const target = await tx
+
+      const [destinationCollection] = await tx
         .select()
+        .from(taskCollections)
+        .where(eq(taskCollections.id, input.destinationCollectionId))
+        .for('update');
+      if (!destinationCollection)
+        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      if (destinationCollection.status === 'ARCHIVED')
+        throw new DomainError(
+          'ARCHIVED_DESTINATION',
+          'Archived collections cannot receive tasks',
+          409,
+        );
+
+      let destinationPhase = null;
+      if (input.destinationPhaseId) {
+        const [phase] = await tx
+          .select()
+          .from(phases)
+          .where(eq(phases.id, input.destinationPhaseId))
+          .for('update');
+        if (!phase) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+        destinationPhase = phase;
+        if (destinationCollection.structure === 'FLAT')
+          throw new DomainError(
+            'FLAT_TASK_PHASE',
+            'Tasks in flat collections cannot belong to a phase',
+            422,
+          );
+        if (phase.collectionId !== destinationCollection.id)
+          throw new DomainError(
+            'CROSS_COLLECTION_PHASE',
+            'Phase must belong to the destination collection',
+            422,
+          );
+      }
+
+      const sameScope =
+        task.collectionId === destinationCollection.id &&
+        task.phaseId === (destinationPhase?.id ?? null);
+      const {
+        destinationCollectionId: _collection,
+        destinationPhaseId: _phase,
+        ...details
+      } = input;
+      if (sameScope) {
+        if (Object.keys(details).length)
+          await tx
+            .update(tasks)
+            .set({ ...details, updatedAt: now() })
+            .where(eq(tasks.id, id));
+        return;
+      }
+      if (task.archivedAt)
+        throw new DomainError(
+          'ARCHIVED_TASK_MOVE',
+          'Restore this archived task before moving it',
+          409,
+        );
+
+      await tx
+        .update(tasks)
+        .set({ position: sql`${tasks.position} + 2000000` })
+        .where(eq(tasks.id, id));
+      await this.normalizeTaskScope(tx, task.collectionId, task.phaseId, id);
+      await this.normalizeTaskScope(tx, destinationCollection.id, destinationPhase?.id ?? null, id);
+      const destination = await tx
+        .select({ id: tasks.id })
         .from(tasks)
         .where(
           and(
-            eq(tasks.collectionId, task.collectionId),
-            phaseId ? eq(tasks.phaseId, phaseId) : isNull(tasks.phaseId),
+            eq(tasks.collectionId, destinationCollection.id),
+            destinationPhase ? eq(tasks.phaseId, destinationPhase.id) : isNull(tasks.phaseId),
             isNull(tasks.archivedAt),
             ne(tasks.id, id),
           ),
-        )
-        .orderBy(asc(tasks.position));
-      const bounded = Math.min(position, target.length);
-      if (!sameScope) await this.normalizeTaskScope(tx, task.collectionId, task.phaseId, id);
+        );
       await tx
         .update(tasks)
-        .set({ position: sql`${tasks.position}+1000000` })
-        .where(
-          and(
-            eq(tasks.collectionId, task.collectionId),
-            phaseId ? eq(tasks.phaseId, phaseId) : isNull(tasks.phaseId),
-            isNull(tasks.archivedAt),
-          ),
-        );
-      const ordered = [...target];
-      ordered.splice(bounded, 0, task);
-      for (const [index, item] of ordered.entries())
-        await tx
-          .update(tasks)
-          .set({ phaseId, position: index, updatedAt: now() })
-          .where(eq(tasks.id, item.id));
-      const [updated] = await tx.select().from(tasks).where(eq(tasks.id, id));
-      return updated;
+        .set({
+          ...details,
+          collectionId: destinationCollection.id,
+          phaseId: destinationPhase?.id ?? null,
+          position: destination.length,
+          updatedAt: now(),
+        })
+        .where(eq(tasks.id, id));
     });
+    return this.task(id);
   }
 
   async completeTask(id: string, reopen = false) {

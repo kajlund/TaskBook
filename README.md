@@ -41,4 +41,4 @@ Database schema changes are generated with `npm run db:generate -w @taskbook/api
 - `packages/contracts`: shared request/response validation only; database models remain private to the API
 - `docs/design`: approved visual references
 
-Ordering uses persisted integer positions and transactional resequencing. Phase completion, collection progress, blocking, and waiting are derived rather than stored. Authentication, collaboration, milestones, and unrelated cross-collection moves are intentionally outside version one.
+Ordering uses persisted integer positions and transactional resequencing. Task edits and cross-collection moves are committed atomically, with moved tasks appended to their destination scope. Phase completion, collection progress, blocking, and waiting are derived rather than stored. Authentication, collaboration, and milestones are intentionally outside version one.

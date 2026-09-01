@@ -70,10 +70,15 @@ export const createTaskSchema = z.object({
 
 export const updateTaskSchema = createTaskSchema.omit({ collectionId: true }).partial();
 export const reorderSchema = z.object({ orderedIds: z.array(uuidSchema).min(1) });
-export const moveTaskSchema = z.object({
-  phaseId: uuidSchema.nullable(),
-  position: z.number().int().nonnegative(),
-});
+export const moveTaskSchema = createTaskSchema
+  .omit({ collectionId: true, phaseId: true, urgency: true })
+  .partial()
+  .extend({
+    destinationCollectionId: uuidSchema,
+    destinationPhaseId: uuidSchema.nullable(),
+    urgency: urgencySchema.optional(),
+  });
+export type MoveTaskInput = z.infer<typeof moveTaskSchema>;
 export const taskListQuerySchema = z.object({
   collectionId: uuidSchema.optional(),
   phaseId: uuidSchema.optional(),

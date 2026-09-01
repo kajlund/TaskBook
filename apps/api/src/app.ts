@@ -44,7 +44,11 @@ app.use('*', async (c, next) => {
 });
 
 const ok = <T>(c: any, data: T, status = 200) => c.json({ data }, status);
-const id = (c: any, key: string) => uuidSchema.parse(c.req.param(key));
+const id = (c: any, key: string) => {
+  const parsed = uuidSchema.safeParse(c.req.param(key));
+  if (!parsed.success) throw new DomainError('INVALID_ID', `Invalid ${key}`, 400);
+  return parsed.data;
+};
 app.get('/api/health', (c) => ok(c, { status: 'ok' }));
 app.get('/api/collections', zValidator('query', collectionListQuerySchema), async (c) => {
   const query = c.req.valid('query');
@@ -137,10 +141,23 @@ app.post('/api/tasks/reorder', zValidator('json', reorderSchema), async (c) =>
   ok(c, await service.reorderTasks(c.req.valid('json').orderedIds)),
 );
 
-app.post('/api/tasks/:taskId/move', zValidator('json', moveTaskSchema), async (c) => {
-  const body = c.req.valid('json');
-  return ok(c, await service.moveTask(id(c, 'taskId'), body.phaseId, body.position));
-});
+app.post(
+  '/api/tasks/:taskId/move',
+  zValidator('json', moveTaskSchema, (result, c) => {
+    if (!result.success)
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid task move request',
+            requestId: (c as any).get('requestId'),
+          },
+        },
+        400,
+      );
+  }),
+  async (c) => ok(c, await service.moveTask(id(c, 'taskId'), c.req.valid('json'))),
+);
 
 for (const [path, reopen] of [
   ['complete', false],

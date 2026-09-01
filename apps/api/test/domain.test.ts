@@ -3,6 +3,7 @@ import {
   createCollectionSchema,
   createPhaseSchema,
   createTaskSchema,
+  moveTaskSchema,
   taskListQuerySchema,
   updateCollectionSchema,
 } from '@taskbook/contracts';
@@ -59,6 +60,23 @@ describe('domain rules', () => {
         collectionId: '11111111-1111-4111-8111-111111111111',
         name: '   ',
       }),
+    ).toThrow();
+  });
+  it('validates cross-collection task moves with atomic field edits', () => {
+    const parsed = moveTaskSchema.parse({
+      destinationCollectionId: '11111111-1111-4111-8111-111111111111',
+      destinationPhaseId: null,
+      name: '  Keep edits  ',
+      waitingReason: ' Waiting on review ',
+    });
+    expect(parsed).toMatchObject({
+      destinationCollectionId: '11111111-1111-4111-8111-111111111111',
+      destinationPhaseId: null,
+      name: 'Keep edits',
+      waitingReason: 'Waiting on review',
+    });
+    expect(() =>
+      moveTaskSchema.parse({ destinationCollectionId: 'bad', destinationPhaseId: null }),
     ).toThrow();
   });
   it('validates combined task filters as calendar dates', () => {

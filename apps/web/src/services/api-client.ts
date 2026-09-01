@@ -49,6 +49,10 @@ export type TaskInput = Pick<
   Task,
   'collectionId' | 'phaseId' | 'name' | 'description' | 'urgency' | 'dueDate' | 'waitingReason'
 >;
+export type MoveTaskInput = Omit<TaskInput, 'collectionId' | 'phaseId'> & {
+  destinationCollectionId: string;
+  destinationPhaseId: string | null;
+};
 export type TaskFilters = Partial<{
   collectionId: string;
   phaseId: string;
@@ -104,10 +108,10 @@ export const api = {
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) }),
   updateTask: (id: string, input: Partial<Omit<TaskInput, 'collectionId'>>) =>
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
-  moveTask: (id: string, phaseId: string | null, position: number) =>
+  moveTask: (id: string, input: MoveTaskInput) =>
     request<Task>(`/tasks/${id}/move`, {
       method: 'POST',
-      body: JSON.stringify({ phaseId, position }),
+      body: JSON.stringify(input),
     }),
   completeTask: (id: string, reopen = false) =>
     request<Task>(`/tasks/${id}/${reopen ? 'reopen' : 'complete'}`, { method: 'POST' }),

@@ -78,7 +78,14 @@ export class TaskBookApp extends LitElement {
   @state() private submitting = false;
   @state() private errors: Record<string, string> = {};
   @state() private actionsOpen = false;
+  @state() private taskFormCollectionId = '';
+  @state() private taskFormPhaseId: string | null = null;
+  @state() private taskFormPhases: Phase[] = [];
+  @state() private taskFormPhasesLoading = false;
+  @state() private taskFormPhasesError = '';
   private loadId = 0;
+  private taskFormPhaseLoadId = 0;
+  private taskFormPhaseCache = new Map<string, Phase[]>();
   private draggedId: string | null = null;
   private draggedPhaseId: string | null = null;
   private draggedTaskId: string | null = null;
@@ -210,6 +217,7 @@ export class TaskBookApp extends LitElement {
   private openModal(modal: Exclude<Modal, null>, source?: HTMLElement) {
     this.returnFocus = source ?? (document.activeElement as HTMLElement);
     this.modal = modal;
+    if (modal.kind === 'task-form') this.prepareTaskForm(modal.task);
     this.actionsOpen = false;
     this.errors = {};
     void this.updateComplete.then(() => {
@@ -490,6 +498,65 @@ export class TaskBookApp extends LitElement {
       ? (this.route.phaseId ?? null)
       : null;
   }
+  private prepareTaskForm(task?: Task) {
+    const collectionId = task?.collectionId ?? this.selected?.id ?? this.collections[0]?.id ?? '';
+    this.taskFormCollectionId = collectionId;
+    this.taskFormPhaseId = task?.phaseId ?? this.taskContextPhase();
+    this.taskFormPhasesError = '';
+    const currentCollectionPhases =
+      this.selected?.id === collectionId && this.selected.structure === 'PHASED'
+        ? this.phases
+        : undefined;
+    if (currentCollectionPhases) this.taskFormPhaseCache.set(collectionId, currentCollectionPhases);
+    void this.loadTaskFormPhases(collectionId, this.taskFormPhaseId);
+  }
+  private async loadTaskFormPhases(collectionId: string, desiredPhaseId: string | null) {
+    const token = ++this.taskFormPhaseLoadId;
+    const collection = this.collections.find((item) => item.id === collectionId);
+    this.taskFormPhasesError = '';
+    if (!collection || collection.structure === 'FLAT') {
+      this.taskFormPhases = [];
+      this.taskFormPhaseId = null;
+      this.taskFormPhasesLoading = false;
+      return;
+    }
+    const cached = this.taskFormPhaseCache.get(collectionId);
+    if (cached) {
+      this.taskFormPhases = cached;
+      this.taskFormPhaseId = cached.some((phase) => phase.id === desiredPhaseId)
+        ? desiredPhaseId
+        : null;
+      this.taskFormPhasesLoading = false;
+      return;
+    }
+    this.taskFormPhases = [];
+    this.taskFormPhaseId = null;
+    this.taskFormPhasesLoading = true;
+    try {
+      const loaded = await api.phases(collectionId);
+      if (token !== this.taskFormPhaseLoadId || this.taskFormCollectionId !== collectionId) return;
+      this.taskFormPhaseCache.set(collectionId, loaded);
+      this.taskFormPhases = loaded;
+      this.taskFormPhaseId = loaded.some((phase) => phase.id === desiredPhaseId)
+        ? desiredPhaseId
+        : null;
+    } catch (error) {
+      if (token !== this.taskFormPhaseLoadId || this.taskFormCollectionId !== collectionId) return;
+      this.taskFormPhasesError =
+        error instanceof Error ? error.message : 'Could not load destination phases.';
+    } finally {
+      if (token === this.taskFormPhaseLoadId) this.taskFormPhasesLoading = false;
+    }
+  }
+  private changeTaskCollection(event: Event) {
+    const collectionId = (event.currentTarget as HTMLSelectElement).value;
+    const original = this.modal?.kind === 'task-form' ? this.modal.task : undefined;
+    const desiredPhaseId =
+      original && original.collectionId === collectionId ? original.phaseId : null;
+    this.taskFormCollectionId = collectionId;
+    this.taskFormPhaseId = desiredPhaseId;
+    void this.loadTaskFormPhases(collectionId, desiredPhaseId);
+  }
   private selectTask(task: Task) {
     const query = new URLSearchParams(location.search);
     query.set('task', task.id);
@@ -527,12 +594,27 @@ export class TaskBookApp extends LitElement {
       void this.updateComplete.then(() => form.querySelector<HTMLElement>('[name=name]')?.focus());
       return null;
     }
-    const collectionId = String(
-      data.get('collectionId') ?? existing?.collectionId ?? this.selected?.id ?? '',
-    );
+    const collectionId = this.taskFormCollectionId;
+    const collection = this.collections.find((item) => item.id === collectionId);
+    if (!collection && !existing?.archivedAt) {
+      this.errors = { collectionId: 'Choose an active collection.' };
+      return null;
+    }
+    if (collection?.structure === 'PHASED' && this.taskFormPhasesLoading) {
+      this.errors = { phaseId: 'Wait for destination phases to finish loading.' };
+      return null;
+    }
+    if (collection?.structure === 'PHASED' && this.taskFormPhasesError) {
+      this.errors = { phaseId: 'Retry loading destination phases before saving.' };
+      return null;
+    }
     return {
       collectionId,
-      phaseId: String(data.get('phaseId') ?? '') || null,
+      phaseId: existing?.archivedAt
+        ? existing.phaseId
+        : collection?.structure === 'PHASED'
+          ? this.taskFormPhaseId
+          : null,
       name,
       description: String(data.get('description') ?? '').trim() || null,
       urgency: String(data.get('urgency') ?? 'MEDIUM') as Task['urgency'],
@@ -543,34 +625,68 @@ export class TaskBookApp extends LitElement {
   private async saveTask(event: SubmitEvent) {
     event.preventDefault();
     if (this.submitting || this.modal?.kind !== 'task-form') return;
+    const form = event.currentTarget as HTMLFormElement;
     const existing = this.modal.task,
-      input = this.taskInput(event.currentTarget as HTMLFormElement, existing);
+      input = this.taskInput(form, existing);
     if (!input) return;
     this.submitting = true;
     try {
       let saved: Task;
       if (existing) {
-        const oldPhase = existing.phaseId;
-        saved = await api.updateTask(existing.id, {
-          name: input.name,
-          description: input.description,
-          urgency: input.urgency,
-          dueDate: input.dueDate,
-          waitingReason: input.waitingReason,
-        });
-        if (oldPhase !== input.phaseId)
-          saved = await api.moveTask(
-            existing.id,
-            input.phaseId,
-            this.tasks.filter((task) => task.phaseId === input.phaseId && !task.archivedAt).length,
-          );
+        saved = existing.archivedAt
+          ? await api.updateTask(existing.id, {
+              name: input.name,
+              description: input.description,
+              urgency: input.urgency,
+              dueDate: input.dueDate,
+              waitingReason: input.waitingReason,
+            })
+          : await api.moveTask(existing.id, {
+              destinationCollectionId: input.collectionId,
+              destinationPhaseId: input.phaseId,
+              name: input.name,
+              description: input.description,
+              urgency: input.urgency,
+              dueDate: input.dueDate,
+              waitingReason: input.waitingReason,
+            });
       } else saved = await api.createTask(input);
       this.modal = null;
-      this.notice = existing ? 'Task updated.' : 'Task created.';
-      await this.reloadTasks();
-      this.selectTask(saved);
+      const moved =
+        existing &&
+        (existing.collectionId !== saved.collectionId || existing.phaseId !== saved.phaseId);
+      if (moved) {
+        this.collections = await api.collections();
+        const destination = this.collections.find((item) => item.id === saved.collectionId)!;
+        this.notice = `Task moved to ${destination.name}.`;
+        const path =
+          destination.structure === 'FLAT'
+            ? `/collections/${destination.id}?task=${saved.id}`
+            : saved.phaseId
+              ? `/collections/${destination.id}/phases/${saved.phaseId}?task=${saved.id}`
+              : `/collections/${destination.id}/backlog?task=${saved.id}`;
+        history.pushState({}, '', path);
+        this.route = readRoute();
+        await this.loadRoute();
+        void this.updateComplete.then(() =>
+          document.querySelector<HTMLElement>('#task-inspector-title')?.focus(),
+        );
+      } else {
+        this.notice = existing ? 'Task updated.' : 'Task created.';
+        await this.reloadTasks();
+        this.selectTask(saved);
+      }
     } catch (error) {
       this.errors = { form: error instanceof Error ? error.message : 'Could not save task.' };
+      void this.updateComplete.then(() => {
+        const message = this.errors.form?.toLowerCase() ?? '';
+        const name = message.includes('phase')
+          ? 'phaseId'
+          : message.includes('collection')
+            ? 'collectionId'
+            : 'name';
+        form.querySelector<HTMLElement>(`[name="${name}"]`)?.focus();
+      });
     } finally {
       this.submitting = false;
     }
@@ -673,7 +789,7 @@ export class TaskBookApp extends LitElement {
 
   private sidebar() {
     return html`<aside class="sidebar">
-      <div class="brand"><img src="/brand/taskbook-horizontal.svg" alt="TaskBook"></div>
+      <div class="brand"><img src="/brand/taskbook-horizontal.svg" alt="TaskBook" /></div>
       <nav aria-label="Primary">
         ${(['today', 'upcoming', 'done'] as const).map(
           (name) =>
@@ -1458,9 +1574,12 @@ ${collection?.description ?? ''}</textarea>
     </dialog>`;
   }
   private taskFormModal(task?: Task) {
-    const collectionId = task?.collectionId ?? this.selected?.id ?? this.collections[0]?.id ?? '';
-    const collection = this.collections.find((item) => item.id === collectionId);
-    const phaseId = task?.phaseId ?? this.taskContextPhase();
+    const collection = this.collections.find((item) => item.id === this.taskFormCollectionId);
+    const movingPreservesState =
+      task &&
+      (Boolean(task.completedAt) ||
+        Boolean(task.dependencies?.length) ||
+        Boolean(task.blockedTasks?.length));
     return html`<dialog
       class="modal"
       aria-modal="true"
@@ -1493,28 +1612,96 @@ ${collection?.description ?? ''}</textarea>
           ></textarea></label
         ><label
           ><span class="field-label">Collection <b aria-hidden="true">*</b></span
-          ><select name="collectionId" required ?disabled=${Boolean(task || this.selected)}>
+          ><select
+            name="collectionId"
+            required
+            .value=${this.taskFormCollectionId}
+            ?disabled=${Boolean(task?.archivedAt || (!task && this.selected))}
+            @change=${this.changeTaskCollection}
+            aria-describedby=${this.errors.collectionId ? 'collection-error' : nothing}
+          >
+            ${
+              task?.archivedAt && !collection
+                ? html`<option value=${task.collectionId}>Current archived collection</option>`
+                : nothing
+            }
             ${this.collections.map(
               (item) =>
-                html`<option value=${item.id} ?selected=${item.id === collectionId}>
-                  ${item.name}
+                html`<option value=${item.id} ?selected=${item.id === this.taskFormCollectionId}>
+                  ${item.name} — ${item.structure === 'FLAT' ? 'Flat' : 'Phased'}
                 </option>`,
             )}
           </select></label
         >${
-          collection?.structure === 'PHASED'
-            ? html`<label
-                >Phase<select name="phaseId">
-                  <option value="" ?selected=${!phaseId}>Backlog</option>
-                  ${this.phases.map(
-                    (phase) =>
-                      html`<option value=${phase.id} ?selected=${phase.id === phaseId}>
-                        ${phase.name}
-                      </option>`,
-                  )}
-                </select></label
-              >`
-            : html`<input type="hidden" name="phaseId" value="" />`
+          this.errors.collectionId
+            ? html`<p id="collection-error" class="field-error" role="alert">
+                ${this.errors.collectionId}
+              </p>`
+            : nothing
+        }${
+          task?.archivedAt
+            ? html`<p class="form-note">
+                Restore this archived task before moving it to another collection.
+              </p>`
+            : collection?.structure === 'PHASED'
+              ? html`<label
+                    ><span class="field-label">Phase</span
+                    ><select
+                      name="phaseId"
+                      .value=${this.taskFormPhaseId ?? ''}
+                      ?disabled=${this.taskFormPhasesLoading || Boolean(this.taskFormPhasesError)}
+                      @change=${(event: Event) =>
+                        (this.taskFormPhaseId =
+                          (event.currentTarget as HTMLSelectElement).value || null)}
+                      aria-describedby="phase-status"
+                    >
+                      <option value="" ?selected=${this.taskFormPhaseId === null}>Backlog</option>
+                      ${this.taskFormPhases.map(
+                        (phase) =>
+                          html`<option
+                            value=${phase.id}
+                            ?selected=${phase.id === this.taskFormPhaseId}
+                          >
+                            ${phase.name}
+                          </option>`,
+                      )}
+                    </select></label
+                  >${
+                    this.taskFormPhasesLoading
+                      ? html`<p id="phase-status" class="form-note" role="status">
+                          Loading phases…
+                        </p>`
+                      : this.taskFormPhasesError
+                        ? html`<div id="phase-status" class="form-error" role="alert">
+                            <span>${this.taskFormPhasesError}</span>
+                            <button
+                              type="button"
+                              class="outline"
+                              @click=${() =>
+                                this.loadTaskFormPhases(
+                                  this.taskFormCollectionId,
+                                  this.taskFormPhaseId,
+                                )}
+                            >
+                              Retry
+                            </button>
+                          </div>`
+                        : html`<p id="phase-status" class="sr-only" aria-live="polite">
+                            ${this.taskFormPhases.length} destination phases available. Backlog is
+                            also available.
+                          </p>`
+                  }${
+                    this.errors.phaseId
+                      ? html`<p class="field-error" role="alert">${this.errors.phaseId}</p>`
+                      : nothing
+                  }`
+              : html`<input type="hidden" name="phaseId" value="" />`
+        }${
+          movingPreservesState
+            ? html`<p class="form-note">
+                Completion and dependency links will be preserved if this task is moved.
+              </p>`
+            : nothing
         }
         <div class="form-grid">
           <label
@@ -1531,7 +1718,12 @@ ${collection?.description ?? ''}</textarea>
         /></label>
         <div class="modal-actions">
           <button type="button" class="outline" @click=${this.closeModal}>Cancel</button
-          ><button class="primary" ?disabled=${this.submitting}>
+          ><button
+            class="primary"
+            ?disabled=${
+              this.submitting || this.taskFormPhasesLoading || Boolean(this.taskFormPhasesError)
+            }
+          >
             ${this.submitting ? 'Saving…' : task ? 'Save changes' : 'Create task'}
           </button>
         </div>

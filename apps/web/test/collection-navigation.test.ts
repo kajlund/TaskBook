@@ -21,6 +21,12 @@ const phased = {
   structure: 'PHASED',
   position: 1,
 };
+const phasedTwo = {
+  ...phased,
+  id: '77777777-7777-4777-8777-777777777777',
+  name: 'Product Launch',
+  position: 2,
+};
 const task = {
   id: '33333333-3333-4333-8333-333333333333',
   collectionId: phased.id,
@@ -39,7 +45,12 @@ const task = {
   blockedTasks: [],
   isWaiting: false,
 };
-const flatTask = { ...task, id: '55555555-5555-4555-8555-555555555555', collectionId: flat.id, name: 'First task' };
+const flatTask = {
+  ...task,
+  id: '55555555-5555-4555-8555-555555555555',
+  collectionId: flat.id,
+  name: 'First task',
+};
 const secondFlatTask = {
   ...flatTask,
   id: '66666666-6666-4666-8666-666666666666',
@@ -53,6 +64,12 @@ const phase = {
   description: null,
   position: 0,
   progress: { completed: 0, total: 0, ratio: 0 },
+};
+const destinationPhase = {
+  ...phase,
+  id: '88888888-8888-4888-8888-888888888888',
+  collectionId: phasedTwo.id,
+  name: 'Delivery',
 };
 
 const response = (data: unknown) =>
@@ -79,6 +96,14 @@ async function settle(element: HTMLElement & { updateComplete: Promise<unknown> 
   await element.updateComplete;
   await new Promise((resolve) => setTimeout(resolve, 0));
   await element.updateComplete;
+}
+
+async function waitFor(check: () => boolean) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(check()).toBe(true);
 }
 
 describe('collection navigation', () => {
@@ -167,7 +192,8 @@ describe('collection navigation', () => {
       const url = String(input);
       if (url.endsWith('/collections')) return response([flat, phased]);
       if (url.includes(`/collections/${flat.id}`)) return response(flat);
-      if (url.includes(`/tasks?collectionId=${flat.id}`)) return response([flatTask, secondFlatTask]);
+      if (url.includes(`/tasks?collectionId=${flat.id}`))
+        return response([flatTask, secondFlatTask]);
       if (url.endsWith('/tasks/reorder')) return response([]);
       return Promise.resolve(new Response('{}', { status: 404 }));
     });
@@ -179,11 +205,12 @@ describe('collection navigation', () => {
     await settle(element);
     element.querySelector<HTMLButtonElement>(`[aria-label="Move ${flatTask.name} down"]`)!.click();
     await settle(element);
-    expect([...element.querySelectorAll('.task-name strong')].map((node) => node.textContent)).toEqual([
-      secondFlatTask.name,
-      flatTask.name,
-    ]);
-    const reorderCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/tasks/reorder'))!;
+    expect(
+      [...element.querySelectorAll('.task-name strong')].map((node) => node.textContent),
+    ).toEqual([secondFlatTask.name, flatTask.name]);
+    const reorderCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/tasks/reorder'),
+    )!;
     expect(JSON.parse(String((reorderCall[1] as RequestInit).body))).toEqual({
       orderedIds: [secondFlatTask.id, flatTask.id],
     });
@@ -197,7 +224,8 @@ describe('collection navigation', () => {
         const url = String(input);
         if (url.endsWith('/collections')) return response([flat, phased]);
         if (url.includes(`/collections/${flat.id}`)) return response(flat);
-        if (url.includes(`/tasks?collectionId=${flat.id}`)) return response([flatTask, secondFlatTask]);
+        if (url.includes(`/tasks?collectionId=${flat.id}`))
+          return response([flatTask, secondFlatTask]);
         if (url.endsWith('/tasks/reorder')) return response([]);
         return Promise.resolve(new Response('{}', { status: 404 }));
       }),
@@ -211,10 +239,9 @@ describe('collection navigation', () => {
     rows[0]!.dispatchEvent(new Event('dragstart', { bubbles: true }));
     rows[1]!.dispatchEvent(new Event('drop', { bubbles: true }));
     await settle(element);
-    expect([...element.querySelectorAll('.task-name strong')].map((node) => node.textContent)).toEqual([
-      secondFlatTask.name,
-      flatTask.name,
-    ]);
+    expect(
+      [...element.querySelectorAll('.task-name strong')].map((node) => node.textContent),
+    ).toEqual([secondFlatTask.name, flatTask.name]);
   });
 
   it("shows the task's actual collection in the edit dialog", async () => {
@@ -243,9 +270,153 @@ describe('collection navigation', () => {
     await settle(element);
     const select = element.querySelector<HTMLSelectElement>('select[name="collectionId"]')!;
     expect(select.value).toBe(phased.id);
-    expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Website Redesign');
+    expect(select.disabled).toBe(false);
+    expect(select.selectedOptions[0]?.textContent).toContain('Website Redesign');
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Personal'),
+      expect.stringContaining('Website Redesign'),
+    ]);
     expect(element.querySelector('dialog')?.textContent).not.toMatch(
       /(?:Description|Due date|Waiting reason)\s*>/,
+    );
+  });
+
+  it('loads ordered destination phases and defaults a new phased collection to Backlog', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}/backlog?task=${task.id}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith('/collections')) return response([flat, phased, phasedTwo]);
+        if (url.includes(`/collections/${phasedTwo.id}/phases`))
+          return response([destinationPhase]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.endsWith(`/tasks/${task.id}`)) return response(task);
+        if (url.includes(`/tasks?collectionId=${phased.id}`)) return response([task]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    [...element.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Edit task'))!
+      .click();
+    await settle(element);
+    const collection = element.querySelector<HTMLSelectElement>('select[name="collectionId"]')!;
+    collection.value = phasedTwo.id;
+    collection.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle(element);
+    const phaseSelect = element.querySelector<HTMLSelectElement>('select[name="phaseId"]')!;
+    expect(phaseSelect.value).toBe('');
+    expect([...phaseSelect.options].map((option) => option.textContent?.trim())).toEqual([
+      'Backlog',
+      'Delivery',
+    ]);
+  });
+
+  it('moves a task atomically, retains form edits, and opens its destination context', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}/backlog?task=${task.id}`);
+    let moveBody: Record<string, unknown> | undefined;
+    const moved = { ...task, collectionId: flat.id, name: 'Edited launch review' };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith(`/tasks/${task.id}/move`)) {
+          moveBody = JSON.parse(String(init?.body));
+          return response(moved);
+        }
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.includes(`/collections/${flat.id}`)) return response(flat);
+        if (url.endsWith(`/tasks/${task.id}`)) return response(moveBody ? moved : task);
+        if (url.includes(`/tasks?collectionId=${phased.id}`)) return response([task]);
+        if (url.includes(`/tasks?collectionId=${flat.id}`)) return response([moved]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    [...element.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Edit task'))!
+      .click();
+    await settle(element);
+    element.querySelector<HTMLInputElement>('input[name="name"]')!.value = moved.name;
+    const collection = element.querySelector<HTMLSelectElement>('select[name="collectionId"]')!;
+    collection.value = flat.id;
+    collection.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle(element);
+    expect(element.querySelector('select[name="phaseId"]')).toBeNull();
+    expect(element.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe(moved.name);
+    element
+      .querySelector<HTMLFormElement>('dialog form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(
+      () => (element as unknown as { notice: string }).notice === `Task moved to ${flat.name}.`,
+    );
+    await settle(element);
+    expect(moveBody).toMatchObject({
+      destinationCollectionId: flat.id,
+      destinationPhaseId: null,
+      name: moved.name,
+    });
+    expect(`${location.pathname}${location.search}`).toBe(
+      `/collections/${flat.id}?task=${task.id}`,
+    );
+    expect(element.querySelector('#task-inspector-title')?.textContent).toBe(moved.name);
+    expect(element.textContent).toContain(`Task moved to ${flat.name}.`);
+  });
+
+  it('keeps the dialog and entered values after a failed move', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}/backlog?task=${task.id}`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith(`/tasks/${task.id}/move`))
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ error: { message: 'Archived collections cannot receive tasks' } }),
+              { status: 409 },
+            ),
+          );
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.endsWith(`/tasks/${task.id}`)) return response(task);
+        if (url.includes(`/tasks?collectionId=${phased.id}`)) return response([task]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+    [...element.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Edit task'))!
+      .click();
+    await settle(element);
+    const name = element.querySelector<HTMLInputElement>('input[name="name"]')!;
+    name.value = 'Unsaved edit';
+    element
+      .querySelector<HTMLFormElement>('dialog form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle(element);
+    expect(element.querySelector('dialog')).not.toBeNull();
+    expect(element.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe(
+      'Unsaved edit',
+    );
+    expect(element.querySelector('[role="alert"]')?.textContent).toContain(
+      'Archived collections cannot receive tasks',
     );
   });
 });
