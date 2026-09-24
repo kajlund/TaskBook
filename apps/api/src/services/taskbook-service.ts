@@ -249,7 +249,12 @@ export class TaskBookService {
       .select()
       .from(tasks)
       .where(eq(tasks.collectionId, collectionId));
-    return rows.map((phase) => this.phaseSummary(phase, collectionTasks));
+    return rows.map((phase) =>
+      this.phaseSummary(
+        phase,
+        collectionTasks.filter((task) => task.phaseId === phase.id),
+      ),
+    );
   }
 
   async phase(id: string) {
@@ -357,6 +362,8 @@ export class TaskBookService {
       completedTaskCount: progress.completed,
       progress: progress.ratio,
       isComplete: progress.total > 0 && progress.completed === progress.total,
+      hasTasks: phaseTasks.length > 0,
+      totalTaskCount: phaseTasks.length,
     };
   }
 

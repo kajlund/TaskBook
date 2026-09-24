@@ -419,4 +419,112 @@ describe('collection navigation', () => {
       'Archived collections cannot receive tasks',
     );
   });
+
+  it('deletes an empty phase from the Manage Phases dialog', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}`);
+    const emptyPhase = {
+      ...phase,
+      id: '99999999-9999-4999-8999-999999999999',
+      name: 'Empty Phase',
+      position: 1,
+      taskCount: 0,
+      hasTasks: false,
+    };
+    let phasesList = [phase, emptyPhase];
+    const deletedSpy = vi.fn();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        if (method === 'DELETE' && url.includes(`/phases/${emptyPhase.id}`)) {
+          deletedSpy();
+          phasesList = phasesList.filter((p) => p.id !== emptyPhase.id);
+          return response(emptyPhase);
+        }
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response(phasesList);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.includes('/tasks?collectionId=')) return response([]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+
+    const manageBtn = element.querySelector<HTMLButtonElement>('button.manage-phases')!;
+    manageBtn.click();
+    await settle(element);
+
+    expect(element.querySelector('dialog.phase-manager')).not.toBeNull();
+    expect(element.textContent).toContain('Empty Phase');
+
+    const deleteBtn = element.querySelector<HTMLButtonElement>(
+      `button[aria-label="Delete ${emptyPhase.name}"]`,
+    )!;
+    expect(deleteBtn).not.toBeNull();
+    deleteBtn.click();
+    await settle(element);
+
+    expect(element.querySelector('dialog.confirmation')).not.toBeNull();
+    expect(element.querySelector('#confirm-title')?.textContent).toContain(`Delete ${emptyPhase.name}?`);
+
+    const confirmBtn = element.querySelector<HTMLButtonElement>('dialog.confirmation button.danger')!;
+    confirmBtn.click();
+    await settle(element);
+
+    expect(deletedSpy).toHaveBeenCalledTimes(1);
+    expect(element.querySelector('dialog.phase-manager')).not.toBeNull();
+    expect(element.querySelector('.managed-phases')?.textContent).not.toContain('Empty Phase');
+  });
+
+  it('prevents deleting a phase that has tasks and shows a notice', async () => {
+    history.replaceState({}, '', `/collections/${phased.id}`);
+    const phaseWithTasks = {
+      ...phase,
+      id: '44444444-4444-4444-8444-444444444444',
+      name: 'Planning',
+      taskCount: 1,
+      hasTasks: true,
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith('/collections')) return response([flat, phased]);
+        if (url.includes(`/collections/${phased.id}/phases`)) return response([phaseWithTasks]);
+        if (url.includes(`/collections/${phased.id}`)) return response(phased);
+        if (url.includes('/tasks?collectionId=')) return response([task]);
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }),
+    );
+
+    const element = document.createElement('taskbook-app') as HTMLElement & {
+      updateComplete: Promise<unknown>;
+    };
+    document.body.append(element);
+    await settle(element);
+
+    const manageBtn = element.querySelector<HTMLButtonElement>('button.manage-phases')!;
+    manageBtn.click();
+    await settle(element);
+
+    const deleteBtn = element.querySelector<HTMLButtonElement>(
+      `button[aria-label*="Cannot delete ${phaseWithTasks.name}"]`,
+    )!;
+    expect(deleteBtn).not.toBeNull();
+    deleteBtn.click();
+    await settle(element);
+
+    expect(element.querySelector('dialog.confirmation')).toBeNull();
+    expect(element.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      `${phaseWithTasks.name} cannot be deleted. Move or delete its tasks first`,
+    );
+  });
 });

@@ -13,9 +13,9 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @taskbook/api\" \"npm run dev -w @taskbook/web\"",
     "start": "npm run start -w @taskbook/api",
-    "build": "npm run build -ws --if-present",
-    "typecheck": "npm run typecheck -ws --if-present",
-    "test": "npm test -ws --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
     "db:start": "docker compose up -d postgres",
     "db:stop": "docker compose down",
     "db:migrate": "npm run db:migrate -w @taskbook/api",

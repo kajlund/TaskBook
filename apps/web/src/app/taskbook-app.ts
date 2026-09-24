@@ -1,4 +1,4 @@
-import { LitElement, html, nothing } from 'lit';
+import { LitElement, html, nothing, type PropertyValues } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
   api,
@@ -98,6 +98,16 @@ export class TaskBookApp extends LitElement {
     super.connectedCallback();
     addEventListener('popstate', this.onPopState);
     void this.initialize();
+  }
+  protected override updated(changedProperties: PropertyValues) {
+    super.updated(changedProperties);
+    if (changedProperties.has('modal') && this.modal) {
+      const dialog = this.querySelector<HTMLDialogElement>('dialog');
+      if (dialog && !dialog.open) {
+        dialog.showModal();
+        dialog.querySelector<HTMLElement>('input, button')?.focus();
+      }
+    }
   }
   disconnectedCallback() {
     removeEventListener('popstate', this.onPopState);
@@ -414,12 +424,9 @@ export class TaskBookApp extends LitElement {
         ? await api.updatePhase(existing.id, input)
         : await api.createPhase(this.selected.id, input);
       this.phases = await api.phases(this.selected.id);
-      this.modal = { kind: 'phases' };
+      this.taskFormPhaseCache.delete(this.selected.id);
       this.notice = existing ? 'Phase updated.' : 'Phase created.';
-      this.navigate(`/collections/${this.selected.id}/phases/${saved.id}`, Boolean(existing));
-      void this.updateComplete.then(() =>
-        document.querySelector<HTMLElement>('#phase-title')?.focus(),
-      );
+      this.openModal({ kind: 'phases' });
     } catch (error) {
       this.errors = { form: error instanceof Error ? error.message : 'Could not save phase.' };
     } finally {
@@ -473,22 +480,37 @@ export class TaskBookApp extends LitElement {
       await api.deletePhase(deleted.id);
       const next = this.phases.filter((phase) => phase.id !== deleted.id);
       this.phases = next;
-      this.modal = { kind: 'phases' };
+      this.taskFormPhaseCache.delete(this.selected.id);
       this.notice = 'Phase deleted.';
       if (this.route.kind === 'collection' && this.route.phaseId === deleted.id) {
         const destination = next[index] ?? next[index - 1];
-        this.navigate(
-          destination
-            ? `/collections/${this.selected.id}/phases/${destination.id}`
-            : `/collections/${this.selected.id}/backlog`,
-          true,
-        );
+        const newPath = destination
+          ? `/collections/${this.selected.id}/phases/${destination.id}`
+          : `/collections/${this.selected.id}/backlog`;
+        history.replaceState({}, '', newPath);
+        this.route = readRoute();
       }
+      this.openModal({ kind: 'phases' });
+      void api
+        .collection(this.selected.id)
+        .then((col) => {
+          this.selected = col;
+        })
+        .catch(() => {});
     } catch (error) {
       this.errors = { form: error instanceof Error ? error.message : 'Could not delete phase.' };
     } finally {
       this.submitting = false;
     }
+  }
+
+  private hasPhaseTasks(phase: Phase) {
+    return Boolean(
+      phase.hasTasks ??
+        (phase.taskCount > 0 ||
+          this.tasks.some((task) => task.phaseId === phase.id) ||
+          this.archivedTasks.some((task) => task.phaseId === phase.id)),
+    );
   }
 
   private taskContextPhase() {
@@ -1487,8 +1509,8 @@ ${collection?.description ?? ''}</textarea>
                 <i class="ph ph-pencil-simple"></i></button
               ><button
                 class="icon-button danger-text"
-                aria-label=${phase.taskCount ? `Cannot delete ${phase.name}: tasks must be moved or deleted first` : `Delete ${phase.name}`}
-                @click=${() => (phase.taskCount ? (this.notice = `${phase.name} cannot be deleted. Move or delete its tasks first, including archived tasks.`) : this.openModal({ kind: 'phase-delete', phase }))}
+                aria-label=${this.hasPhaseTasks(phase) ? `Cannot delete ${phase.name}: tasks must be moved or deleted first` : `Delete ${phase.name}`}
+                @click=${() => (this.hasPhaseTasks(phase) ? (this.notice = `${phase.name} cannot be deleted. Move or delete its tasks first, including archived tasks.`) : this.openModal({ kind: 'phase-delete', phase }))}
               >
                 <i class="ph ph-trash"></i>
               </button>

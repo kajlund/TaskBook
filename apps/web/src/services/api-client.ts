@@ -25,6 +25,8 @@ export type Phase = {
   completedTaskCount: number;
   progress: number;
   isComplete: boolean;
+  hasTasks?: boolean;
+  totalTaskCount?: number;
 };
 export type PhaseInput = Pick<Phase, 'name' | 'description' | 'startDate' | 'targetEndDate'>;
 export type Task = {
