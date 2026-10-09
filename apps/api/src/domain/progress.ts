@@ -1,4 +1,7 @@
-export type ProgressTask = { completedAt: Date | string | null; archivedAt: Date | string | null };
+export type ProgressTask = {
+  completedAt: Date | string | null;
+  archivedAt: Date | string | null;
+};
 
 export function calculateProgress(tasks: ProgressTask[]) {
   const active = tasks.filter((task) => task.archivedAt === null);

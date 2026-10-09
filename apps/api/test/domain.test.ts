@@ -12,16 +12,20 @@ import { calculateProgress, isPhaseComplete } from '../src/domain/progress.js';
 import { validateReorder } from '../src/domain/ordering.js';
 describe('domain rules', () => {
   it('creates valid flat and phased collection inputs', () => {
-    expect(createCollectionSchema.parse({ name: ' Personal ', structure: 'FLAT' }).name).toBe(
-      'Personal',
-    );
-    expect(createCollectionSchema.parse({ name: 'Launch', structure: 'PHASED' }).structure).toBe(
-      'PHASED',
-    );
+    expect(
+      createCollectionSchema.parse({ name: ' Personal ', structure: 'FLAT' })
+        .name,
+    ).toBe('Personal');
+    expect(
+      createCollectionSchema.parse({ name: 'Launch', structure: 'PHASED' })
+        .structure,
+    ).toBe('PHASED');
   });
 
   it('rejects blank names and invalid collection dates', () => {
-    expect(() => createCollectionSchema.parse({ name: '   ', structure: 'FLAT' })).toThrow();
+    expect(() =>
+      createCollectionSchema.parse({ name: '   ', structure: 'FLAT' }),
+    ).toThrow();
     expect(() =>
       createCollectionSchema.parse({
         name: 'Schedule',
@@ -38,7 +42,9 @@ describe('domain rules', () => {
     });
   });
   it('trims phase names and validates phase dates', () => {
-    expect(createPhaseSchema.parse({ name: ' Discovery ' }).name).toBe('Discovery');
+    expect(createPhaseSchema.parse({ name: ' Discovery ' }).name).toBe(
+      'Discovery',
+    );
     expect(() => createPhaseSchema.parse({ name: '   ' })).toThrow();
     expect(() =>
       createPhaseSchema.parse({
@@ -76,7 +82,10 @@ describe('domain rules', () => {
       waitingReason: 'Waiting on review',
     });
     expect(() =>
-      moveTaskSchema.parse({ destinationCollectionId: 'bad', destinationPhaseId: null }),
+      moveTaskSchema.parse({
+        destinationCollectionId: 'bad',
+        destinationPhaseId: null,
+      }),
     ).toThrow();
   });
   it('validates combined task filters as calendar dates', () => {
@@ -95,8 +104,13 @@ describe('domain rules', () => {
     });
   });
   it('returns zero progress for no active tasks', () =>
-    expect(calculateProgress([])).toEqual({ completed: 0, total: 0, ratio: 0 }));
-  it('does not complete an empty phase', () => expect(isPhaseComplete([])).toBe(false));
+    expect(calculateProgress([])).toEqual({
+      completed: 0,
+      total: 0,
+      ratio: 0,
+    }));
+  it('does not complete an empty phase', () =>
+    expect(isPhaseComplete([])).toBe(false));
   it('excludes archived tasks', () =>
     expect(
       calculateProgress([

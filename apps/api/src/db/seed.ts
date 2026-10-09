@@ -1,5 +1,10 @@
 import { db, pool } from './client.js';
-import { phases, taskCollections, taskDependencies, tasks } from './schema/index.js';
+import {
+  phases,
+  taskCollections,
+  taskDependencies,
+  tasks,
+} from './schema/index.js';
 await db.transaction(async (tx) => {
   await tx.delete(taskDependencies);
   await tx.delete(tasks);
@@ -55,17 +60,27 @@ await db.transaction(async (tx) => {
     ])
     .returning();
   const website = collections.find((c) => c.name === 'Website Redesign')!;
-  const personal = collections.find((c) => c.name === 'Personal Administration')!;
-  const phaseDates = ['2026-08-17', '2026-08-31', '2026-09-07', '2026-09-21', '2026-10-26'];
+  const personal = collections.find(
+    (c) => c.name === 'Personal Administration',
+  )!;
+  const phaseDates = [
+    '2026-08-17',
+    '2026-08-31',
+    '2026-09-07',
+    '2026-09-21',
+    '2026-10-26',
+  ];
   const websitePhases = await tx
     .insert(phases)
     .values(
-      ['Discovery', 'Planning', 'Design', 'Development', 'Launch'].map((name, position) => ({
-        collectionId: website.id,
-        name,
-        position,
-        startDate: phaseDates[position],
-      })),
+      ['Discovery', 'Planning', 'Design', 'Development', 'Launch'].map(
+        (name, position) => ({
+          collectionId: website.id,
+          name,
+          position,
+          startDate: phaseDates[position],
+        }),
+      ),
     )
     .returning();
   const discovery = websitePhases[0]!;
@@ -131,7 +146,9 @@ await db.transaction(async (tx) => {
       },
     ])
     .returning();
-  const architecture = created.find((t) => t.name === 'Define information architecture')!;
+  const architecture = created.find(
+    (t) => t.name === 'Define information architecture',
+  )!;
   const sitemap = created.find((t) => t.name === 'Sitemap')!;
   await tx
     .insert(taskDependencies)

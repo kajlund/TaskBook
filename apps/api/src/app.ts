@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { cors } from 'hono/cors';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import pino from 'pino';
 import { zValidator } from '@hono/zod-validator';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -38,42 +39,70 @@ app.use('*', async (c, next) => {
   c.header('x-request-id', id);
   await next();
   logger.info(
-    { requestId: id, method: c.req.method, path: c.req.path, status: c.res.status },
+    {
+      requestId: id,
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+    },
     'request',
   );
 });
 
-const ok = <T>(c: any, data: T, status = 200) => c.json({ data }, status);
-const id = (c: any, key: string) => {
+const ok = <T>(
+  c: Context<AppEnv>,
+  data: T,
+  status: ContentfulStatusCode = 200,
+) => c.json({ data }, status);
+const id = (c: Context<AppEnv>, key: string) => {
   const parsed = uuidSchema.safeParse(c.req.param(key));
-  if (!parsed.success) throw new DomainError('INVALID_ID', `Invalid ${key}`, 400);
+  if (!parsed.success)
+    throw new DomainError('INVALID_ID', `Invalid ${key}`, 400);
   return parsed.data;
 };
 app.get('/api/health', (c) => ok(c, { status: 'ok' }));
-app.get('/api/collections', zValidator('query', collectionListQuerySchema), async (c) => {
-  const query = c.req.valid('query');
-  return ok(
-    c,
-    await service.collections({
-      ...(query.status && { status: query.status }),
-      includeArchived: query.includeArchived === 'true',
-    }),
-  );
-});
-app.post('/api/collections', zValidator('json', createCollectionSchema), async (c) =>
-  ok(c, await service.createCollection(c.req.valid('json')), 201),
+app.get(
+  '/api/collections',
+  zValidator('query', collectionListQuerySchema),
+  async (c) => {
+    const query = c.req.valid('query');
+    return ok(
+      c,
+      await service.collections({
+        ...(query.status && { status: query.status }),
+        includeArchived: query.includeArchived === 'true',
+      }),
+    );
+  },
+);
+app.post(
+  '/api/collections',
+  zValidator('json', createCollectionSchema),
+  async (c) => ok(c, await service.createCollection(c.req.valid('json')), 201),
 );
 
 app.get('/api/collections/:collectionId', async (c) =>
   ok(c, await service.collection(id(c, 'collectionId'))),
 );
 
-app.patch('/api/collections/:collectionId', zValidator('json', updateCollectionSchema), async (c) =>
-  ok(c, await service.updateCollection(id(c, 'collectionId'), c.req.valid('json'))),
+app.patch(
+  '/api/collections/:collectionId',
+  zValidator('json', updateCollectionSchema),
+  async (c) =>
+    ok(
+      c,
+      await service.updateCollection(
+        id(c, 'collectionId'),
+        c.req.valid('json'),
+      ),
+    ),
 );
 
-app.post('/api/collections/reorder', zValidator('json', reorderSchema), async (c) =>
-  ok(c, await service.reorderCollections(c.req.valid('json').orderedIds)),
+app.post(
+  '/api/collections/reorder',
+  zValidator('json', reorderSchema),
+  async (c) =>
+    ok(c, await service.reorderCollections(c.req.valid('json').orderedIds)),
 );
 for (const [path, restore] of [
   ['archive', false],
@@ -93,20 +122,38 @@ app.get('/api/collections/:collectionId/phases', async (c) =>
 app.post(
   '/api/collections/:collectionId/phases',
   zValidator('json', createPhaseSchema),
-  async (c) => ok(c, await service.createPhase(id(c, 'collectionId'), c.req.valid('json')), 201),
+  async (c) =>
+    ok(
+      c,
+      await service.createPhase(id(c, 'collectionId'), c.req.valid('json')),
+      201,
+    ),
 );
-app.get('/api/phases/:phaseId', async (c) => ok(c, await service.phase(id(c, 'phaseId'))));
-app.patch('/api/phases/:phaseId', zValidator('json', updatePhaseSchema), async (c) =>
-  ok(c, await service.updatePhase(id(c, 'phaseId'), c.req.valid('json'))),
+app.get('/api/phases/:phaseId', async (c) =>
+  ok(c, await service.phase(id(c, 'phaseId'))),
+);
+app.patch(
+  '/api/phases/:phaseId',
+  zValidator('json', updatePhaseSchema),
+  async (c) =>
+    ok(c, await service.updatePhase(id(c, 'phaseId'), c.req.valid('json'))),
 );
 
-app.delete('/api/phases/:phaseId', async (c) => ok(c, await service.deletePhase(id(c, 'phaseId'))));
+app.delete('/api/phases/:phaseId', async (c) =>
+  ok(c, await service.deletePhase(id(c, 'phaseId'))),
+);
 
 app.post(
   '/api/collections/:collectionId/phases/reorder',
   zValidator('json', reorderSchema),
   async (c) =>
-    ok(c, await service.reorderPhases(id(c, 'collectionId'), c.req.valid('json').orderedIds)),
+    ok(
+      c,
+      await service.reorderPhases(
+        id(c, 'collectionId'),
+        c.req.valid('json').orderedIds,
+      ),
+    ),
 );
 
 app.get('/api/tasks', zValidator('query', taskListQuerySchema), async (c) => {
@@ -117,7 +164,9 @@ app.get('/api/tasks', zValidator('query', taskListQuerySchema), async (c) => {
       ...(query.collectionId && { collectionId: query.collectionId }),
       ...(query.phaseId && { phaseId: query.phaseId }),
       unassigned: query.unassigned === 'true',
-      ...(query.completed !== undefined && { completed: query.completed === 'true' }),
+      ...(query.completed !== undefined && {
+        completed: query.completed === 'true',
+      }),
       ...(query.waiting !== undefined && { waiting: query.waiting === 'true' }),
       ...(query.urgency && { urgency: query.urgency }),
       ...(query.dueBefore && { dueBefore: query.dueBefore }),
@@ -131,10 +180,15 @@ app.post('/api/tasks', zValidator('json', createTaskSchema), async (c) =>
   ok(c, await service.createTask(c.req.valid('json')), 201),
 );
 
-app.get('/api/tasks/:taskId', async (c) => ok(c, await service.task(id(c, 'taskId'))));
+app.get('/api/tasks/:taskId', async (c) =>
+  ok(c, await service.task(id(c, 'taskId'))),
+);
 
-app.patch('/api/tasks/:taskId', zValidator('json', updateTaskSchema), async (c) =>
-  ok(c, await service.updateTask(id(c, 'taskId'), c.req.valid('json'))),
+app.patch(
+  '/api/tasks/:taskId',
+  zValidator('json', updateTaskSchema),
+  async (c) =>
+    ok(c, await service.updateTask(id(c, 'taskId'), c.req.valid('json'))),
 );
 
 app.post('/api/tasks/reorder', zValidator('json', reorderSchema), async (c) =>
@@ -150,13 +204,14 @@ app.post(
           error: {
             code: 'VALIDATION_ERROR',
             message: 'Invalid task move request',
-            requestId: (c as any).get('requestId'),
+            requestId: c.res.headers.get('x-request-id'),
           },
         },
         400,
       );
   }),
-  async (c) => ok(c, await service.moveTask(id(c, 'taskId'), c.req.valid('json'))),
+  async (c) =>
+    ok(c, await service.moveTask(id(c, 'taskId'), c.req.valid('json'))),
 );
 
 for (const [path, reopen] of [
@@ -179,8 +234,18 @@ app.get('/api/tasks/:taskId/dependencies', async (c) =>
   ok(c, await service.dependencies(id(c, 'taskId'))),
 );
 
-app.post('/api/tasks/:taskId/dependencies', zValidator('json', dependencySchema), async (c) =>
-  ok(c, await service.addDependency(id(c, 'taskId'), c.req.valid('json').dependsOnTaskId), 201),
+app.post(
+  '/api/tasks/:taskId/dependencies',
+  zValidator('json', dependencySchema),
+  async (c) =>
+    ok(
+      c,
+      await service.addDependency(
+        id(c, 'taskId'),
+        c.req.valid('json').dependsOnTaskId,
+      ),
+      201,
+    ),
 );
 
 app.delete('/api/tasks/:taskId/dependencies/:dependsOnTaskId', async (c) => {
@@ -194,7 +259,13 @@ app.delete('/api/tasks/:taskId', async (c) => {
 
 app.all('/api/*', (c) =>
   c.json(
-    { error: { code: 'NOT_FOUND', message: 'Route not found', requestId: c.get('requestId') } },
+    {
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Route not found',
+        requestId: c.get('requestId'),
+      },
+    },
     404,
   ),
 );
@@ -204,7 +275,13 @@ app.get('*', serveStatic({ root: '../web/dist', path: 'index.html' }));
 
 app.notFound((c) =>
   c.json(
-    { error: { code: 'NOT_FOUND', message: 'Route not found', requestId: c.get('requestId') } },
+    {
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Route not found',
+        requestId: c.get('requestId'),
+      },
+    },
     404,
   ),
 );
@@ -213,12 +290,25 @@ app.onError((error, c) => {
   const requestId = c.get('requestId') ?? randomUUID();
   if (error instanceof DomainError)
     return c.json(
-      { error: { code: error.code, message: error.message, details: error.details, requestId } },
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          requestId,
+        },
+      },
       error.status,
     );
   logger.error({ err: error, requestId }, 'unhandled error');
   return c.json(
-    { error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred', requestId } },
+    {
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred',
+        requestId,
+      },
+    },
     500,
   );
 });

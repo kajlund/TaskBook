@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type { z } from 'zod';
 
 import type {
@@ -11,7 +23,12 @@ import type {
   updateTaskSchema,
 } from '@taskbook/contracts';
 import type { Database } from '../db/client.js';
-import { phases, taskCollections, taskDependencies, tasks } from '../db/schema/index.js';
+import {
+  phases,
+  taskCollections,
+  taskDependencies,
+  tasks,
+} from '../db/schema/index.js';
 import { assertAcyclic } from '../domain/dependencies.js';
 import { calculateProgress } from '../domain/progress.js';
 import { validateReorder } from '../domain/ordering.js';
@@ -44,7 +61,10 @@ export class TaskBookService {
       rows.map(async (collection) => ({
         ...collection,
         progress: calculateProgress(
-          await this.database.select().from(tasks).where(eq(tasks.collectionId, collection.id)),
+          await this.database
+            .select()
+            .from(tasks)
+            .where(eq(tasks.collectionId, collection.id)),
         ),
       })),
     );
@@ -56,7 +76,11 @@ export class TaskBookService {
       .from(taskCollections)
       .where(eq(taskCollections.id, id));
     if (!collection)
-      throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      throw new DomainError(
+        'COLLECTION_NOT_FOUND',
+        'Task collection not found',
+        404,
+      );
     const collectionTasks = await this.database
       .select()
       .from(tasks)
@@ -72,7 +96,10 @@ export class TaskBookService {
       .leftJoin(tasks, eq(tasks.collectionId, taskCollections.id))
       .leftJoin(
         taskDependencies,
-        or(eq(taskDependencies.taskId, tasks.id), eq(taskDependencies.dependsOnTaskId, tasks.id)),
+        or(
+          eq(taskDependencies.taskId, tasks.id),
+          eq(taskDependencies.dependsOnTaskId, tasks.id),
+        ),
       )
       .where(eq(taskCollections.id, id));
     const impact = impacts[0];
@@ -99,14 +126,27 @@ export class TaskBookService {
     return created;
   }
 
-  async updateCollection(id: string, input: z.infer<typeof updateCollectionSchema>) {
+  async updateCollection(
+    id: string,
+    input: z.infer<typeof updateCollectionSchema>,
+  ) {
     return this.database.transaction(async (tx) => {
-      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      const [existing] = await tx
+        .select()
+        .from(taskCollections)
+        .where(eq(taskCollections.id, id));
       if (!existing)
-        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
-      const startDate = input.startDate === undefined ? existing.startDate : input.startDate;
+        throw new DomainError(
+          'COLLECTION_NOT_FOUND',
+          'Task collection not found',
+          404,
+        );
+      const startDate =
+        input.startDate === undefined ? existing.startDate : input.startDate;
       const targetEndDate =
-        input.targetEndDate === undefined ? existing.targetEndDate : input.targetEndDate;
+        input.targetEndDate === undefined
+          ? existing.targetEndDate
+          : input.targetEndDate;
       if (startDate && targetEndDate && targetEndDate < startDate)
         throw new DomainError(
           'INVALID_COLLECTION_DATES',
@@ -169,9 +209,16 @@ export class TaskBookService {
 
   async archiveCollection(id: string, restore = false) {
     return this.database.transaction(async (tx) => {
-      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      const [existing] = await tx
+        .select()
+        .from(taskCollections)
+        .where(eq(taskCollections.id, id));
       if (!existing)
-        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+        throw new DomainError(
+          'COLLECTION_NOT_FOUND',
+          'Task collection not found',
+          404,
+        );
       if (restore) {
         const counts = await tx
           .select({ count: sql<number>`count(*)::int` })
@@ -179,7 +226,11 @@ export class TaskBookService {
           .where(ne(taskCollections.status, 'ARCHIVED'));
         const [restored] = await tx
           .update(taskCollections)
-          .set({ status: 'ACTIVE', position: counts[0]?.count ?? 0, updatedAt: now() })
+          .set({
+            status: 'ACTIVE',
+            position: counts[0]?.count ?? 0,
+            updatedAt: now(),
+          })
           .where(eq(taskCollections.id, id))
           .returning();
         return restored;
@@ -204,16 +255,26 @@ export class TaskBookService {
           ),
         );
       for (const [position, item] of active.entries())
-        await tx.update(taskCollections).set({ position }).where(eq(taskCollections.id, item.id));
+        await tx
+          .update(taskCollections)
+          .set({ position })
+          .where(eq(taskCollections.id, item.id));
       return archived;
     });
   }
 
   async deleteCollection(id: string) {
     return this.database.transaction(async (tx) => {
-      const [existing] = await tx.select().from(taskCollections).where(eq(taskCollections.id, id));
+      const [existing] = await tx
+        .select()
+        .from(taskCollections)
+        .where(eq(taskCollections.id, id));
       if (!existing)
-        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+        throw new DomainError(
+          'COLLECTION_NOT_FOUND',
+          'Task collection not found',
+          404,
+        );
       if (existing.status !== 'ARCHIVED')
         throw new DomainError(
           'COLLECTION_NOT_ARCHIVED',
@@ -258,16 +319,30 @@ export class TaskBookService {
   }
 
   async phase(id: string) {
-    const [phase] = await this.database.select().from(phases).where(eq(phases.id, id));
-    if (!phase) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
-    const phaseTasks = await this.database.select().from(tasks).where(eq(tasks.phaseId, id));
+    const [phase] = await this.database
+      .select()
+      .from(phases)
+      .where(eq(phases.id, id));
+    if (!phase)
+      throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+    const phaseTasks = await this.database
+      .select()
+      .from(tasks)
+      .where(eq(tasks.phaseId, id));
     return this.phaseSummary(phase, phaseTasks);
   }
 
-  async createPhase(collectionId: string, input: z.infer<typeof createPhaseSchema>) {
+  async createPhase(
+    collectionId: string,
+    input: z.infer<typeof createPhaseSchema>,
+  ) {
     const collection = await this.collection(collectionId);
     if (collection.structure !== 'PHASED')
-      throw new DomainError('FLAT_COLLECTION_PHASE', 'Flat collections cannot contain phases', 409);
+      throw new DomainError(
+        'FLAT_COLLECTION_PHASE',
+        'Flat collections cannot contain phases',
+        409,
+      );
     const counts = await this.database
       .select({ count: sql<number>`count(*)::int` })
       .from(phases)
@@ -281,9 +356,12 @@ export class TaskBookService {
 
   async updatePhase(id: string, input: z.infer<typeof updatePhaseSchema>) {
     const existing = await this.phase(id);
-    const startDate = input.startDate === undefined ? existing.startDate : input.startDate;
+    const startDate =
+      input.startDate === undefined ? existing.startDate : input.startDate;
     const targetEndDate =
-      input.targetEndDate === undefined ? existing.targetEndDate : input.targetEndDate;
+      input.targetEndDate === undefined
+        ? existing.targetEndDate
+        : input.targetEndDate;
     if (startDate && targetEndDate && targetEndDate < startDate)
       throw new DomainError(
         'INVALID_PHASE_DATES',
@@ -316,15 +394,21 @@ export class TaskBookService {
         await tx
           .update(phases)
           .set({ position: item.position, updatedAt: now() })
-          .where(and(eq(phases.id, item.id), eq(phases.collectionId, collectionId)));
+          .where(
+            and(eq(phases.id, item.id), eq(phases.collectionId, collectionId)),
+          );
       return ordered;
     });
   }
 
   async deletePhase(id: string) {
     return this.database.transaction(async (tx) => {
-      const [existing] = await tx.select().from(phases).where(eq(phases.id, id));
-      if (!existing) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+      const [existing] = await tx
+        .select()
+        .from(phases)
+        .where(eq(phases.id, id));
+      if (!existing)
+        throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
       const counts = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(tasks)
@@ -335,7 +419,10 @@ export class TaskBookService {
           'Tasks still reference this phase. Move or delete them before deleting the phase.',
           409,
         );
-      const [deleted] = await tx.delete(phases).where(eq(phases.id, id)).returning();
+      const [deleted] = await tx
+        .delete(phases)
+        .where(eq(phases.id, id))
+        .returning();
       const remaining = await tx
         .select({ id: phases.id })
         .from(phases)
@@ -346,7 +433,10 @@ export class TaskBookService {
         .set({ position: sql`${phases.position} + 1000000` })
         .where(eq(phases.collectionId, existing.collectionId));
       for (const [position, item] of remaining.entries())
-        await tx.update(phases).set({ position, updatedAt: now() }).where(eq(phases.id, item.id));
+        await tx
+          .update(phases)
+          .set({ position, updatedAt: now() })
+          .where(eq(phases.id, item.id));
       return deleted;
     });
   }
@@ -379,10 +469,12 @@ export class TaskBookService {
     dueAfter?: string;
   }) {
     const clauses = [];
-    if (filters.collectionId) clauses.push(eq(tasks.collectionId, filters.collectionId));
+    if (filters.collectionId)
+      clauses.push(eq(tasks.collectionId, filters.collectionId));
     if (filters.phaseId) clauses.push(eq(tasks.phaseId, filters.phaseId));
     if (filters.unassigned) clauses.push(isNull(tasks.phaseId));
-    if (filters.completed === true) clauses.push(sql`${tasks.completedAt} IS NOT NULL`);
+    if (filters.completed === true)
+      clauses.push(sql`${tasks.completedAt} IS NOT NULL`);
     if (filters.completed === false) clauses.push(isNull(tasks.completedAt));
     if (filters.urgency) clauses.push(eq(tasks.urgency, filters.urgency));
     if (filters.dueBefore) clauses.push(lte(tasks.dueDate, filters.dueBefore));
@@ -400,14 +492,22 @@ export class TaskBookService {
       .select()
       .from(tasks)
       .where(and(...clauses));
-    if (filters.completed === true) return query.orderBy(desc(tasks.completedAt));
+    if (filters.completed === true)
+      return query.orderBy(desc(tasks.completedAt));
     if (filters.dueBefore || filters.dueAfter)
-      return query.orderBy(asc(tasks.dueDate), asc(tasks.collectionId), asc(tasks.position));
+      return query.orderBy(
+        asc(tasks.dueDate),
+        asc(tasks.collectionId),
+        asc(tasks.position),
+      );
     return query.orderBy(asc(tasks.position));
   }
 
   async task(id: string) {
-    const [task] = await this.database.select().from(tasks).where(eq(tasks.id, id));
+    const [task] = await this.database
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, id));
     if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
     const dependencyRows = await this.dependenciesFor(id);
     const blockingRows = await this.database
@@ -420,7 +520,8 @@ export class TaskBookService {
       dependencies: dependencyRows,
       blockedTasks: blockingRows.map((row) => row.task),
       isWaiting:
-        task.waitingReason !== null || dependencyRows.some((item) => item.completedAt === null),
+        task.waitingReason !== null ||
+        dependencyRows.some((item) => item.completedAt === null),
     };
   }
 
@@ -435,7 +536,11 @@ export class TaskBookService {
       .where(and(scope, isNull(tasks.archivedAt)));
     const [created] = await this.database
       .insert(tasks)
-      .values({ ...input, phaseId: input.phaseId ?? null, position: counts[0]?.count ?? 0 })
+      .values({
+        ...input,
+        phaseId: input.phaseId ?? null,
+        position: counts[0]?.count ?? 0,
+      })
       .returning();
     return created;
   }
@@ -462,17 +567,33 @@ export class TaskBookService {
     return this.database.transaction(async (tx) => {
       const rows = await tx.select().from(tasks).where(inArray(tasks.id, ids));
       if (rows.length !== ids.length)
-        throw new DomainError('INVALID_REORDER', 'One or more tasks do not exist', 422);
+        throw new DomainError(
+          'INVALID_REORDER',
+          'One or more tasks do not exist',
+          422,
+        );
       const first = rows[0]!;
-      if (rows.some((t) => t.collectionId !== first.collectionId || t.phaseId !== first.phaseId))
-        throw new DomainError('CROSS_SCOPE_REORDER', 'Tasks must share one ordering scope', 422);
+      if (
+        rows.some(
+          (t) =>
+            t.collectionId !== first.collectionId ||
+            t.phaseId !== first.phaseId,
+        )
+      )
+        throw new DomainError(
+          'CROSS_SCOPE_REORDER',
+          'Tasks must share one ordering scope',
+          422,
+        );
       const current = await tx
         .select({ id: tasks.id })
         .from(tasks)
         .where(
           and(
             eq(tasks.collectionId, first.collectionId),
-            first.phaseId ? eq(tasks.phaseId, first.phaseId) : isNull(tasks.phaseId),
+            first.phaseId
+              ? eq(tasks.phaseId, first.phaseId)
+              : isNull(tasks.phaseId),
             isNull(tasks.archivedAt),
           ),
         )
@@ -496,7 +617,11 @@ export class TaskBookService {
 
   async moveTask(id: string, input: z.infer<typeof moveTaskSchema>) {
     await this.database.transaction(async (tx) => {
-      const [task] = await tx.select().from(tasks).where(eq(tasks.id, id)).for('update');
+      const [task] = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, id))
+        .for('update');
       if (!task) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
 
       const [destinationCollection] = await tx
@@ -505,7 +630,11 @@ export class TaskBookService {
         .where(eq(taskCollections.id, input.destinationCollectionId))
         .for('update');
       if (!destinationCollection)
-        throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+        throw new DomainError(
+          'COLLECTION_NOT_FOUND',
+          'Task collection not found',
+          404,
+        );
       if (destinationCollection.status === 'ARCHIVED')
         throw new DomainError(
           'ARCHIVED_DESTINATION',
@@ -520,7 +649,8 @@ export class TaskBookService {
           .from(phases)
           .where(eq(phases.id, input.destinationPhaseId))
           .for('update');
-        if (!phase) throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
+        if (!phase)
+          throw new DomainError('PHASE_NOT_FOUND', 'Phase not found', 404);
         destinationPhase = phase;
         if (destinationCollection.structure === 'FLAT')
           throw new DomainError(
@@ -564,14 +694,21 @@ export class TaskBookService {
         .set({ position: sql`${tasks.position} + 2000000` })
         .where(eq(tasks.id, id));
       await this.normalizeTaskScope(tx, task.collectionId, task.phaseId, id);
-      await this.normalizeTaskScope(tx, destinationCollection.id, destinationPhase?.id ?? null, id);
+      await this.normalizeTaskScope(
+        tx,
+        destinationCollection.id,
+        destinationPhase?.id ?? null,
+        id,
+      );
       const destination = await tx
         .select({ id: tasks.id })
         .from(tasks)
         .where(
           and(
             eq(tasks.collectionId, destinationCollection.id),
-            destinationPhase ? eq(tasks.phaseId, destinationPhase.id) : isNull(tasks.phaseId),
+            destinationPhase
+              ? eq(tasks.phaseId, destinationPhase.id)
+              : isNull(tasks.phaseId),
             isNull(tasks.archivedAt),
             ne(tasks.id, id),
           ),
@@ -603,7 +740,8 @@ export class TaskBookService {
   async archiveTask(id: string, restore = false) {
     return this.database.transaction(async (tx) => {
       const [existing] = await tx.select().from(tasks).where(eq(tasks.id, id));
-      if (!existing) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+      if (!existing)
+        throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
       if (restore) {
         const [collection] = await tx
           .select()
@@ -630,7 +768,12 @@ export class TaskBookService {
           );
         const [updated] = await tx
           .update(tasks)
-          .set({ archivedAt: null, phaseId, position: active.length, updatedAt: now() })
+          .set({
+            archivedAt: null,
+            phaseId,
+            position: active.length,
+            updatedAt: now(),
+          })
           .where(eq(tasks.id, id))
           .returning();
         return updated;
@@ -640,7 +783,12 @@ export class TaskBookService {
         .set({ archivedAt: now(), updatedAt: now() })
         .where(eq(tasks.id, id))
         .returning();
-      await this.normalizeTaskScope(tx, existing.collectionId, existing.phaseId, id);
+      await this.normalizeTaskScope(
+        tx,
+        existing.collectionId,
+        existing.phaseId,
+        id,
+      );
       return updated;
     });
   }
@@ -648,7 +796,8 @@ export class TaskBookService {
   async deleteTask(id: string) {
     return this.database.transaction(async (tx) => {
       const [existing] = await tx.select().from(tasks).where(eq(tasks.id, id));
-      if (!existing) throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
+      if (!existing)
+        throw new DomainError('TASK_NOT_FOUND', 'Task not found', 404);
       if (!existing.archivedAt)
         throw new DomainError(
           'TASK_NOT_ARCHIVED',
@@ -657,7 +806,12 @@ export class TaskBookService {
         );
       await tx
         .delete(taskDependencies)
-        .where(or(eq(taskDependencies.taskId, id), eq(taskDependencies.dependsOnTaskId, id)));
+        .where(
+          or(
+            eq(taskDependencies.taskId, id),
+            eq(taskDependencies.dependsOnTaskId, id),
+          ),
+        );
       await tx.delete(tasks).where(eq(tasks.id, id));
     });
   }
@@ -672,7 +826,10 @@ export class TaskBookService {
   }
 
   async addDependency(taskId: string, dependsOnTaskId: string) {
-    const [task, dependency] = await Promise.all([this.task(taskId), this.task(dependsOnTaskId)]);
+    const [task, dependency] = await Promise.all([
+      this.task(taskId),
+      this.task(dependsOnTaskId),
+    ]);
     if (dependency.archivedAt)
       throw new DomainError(
         'ARCHIVED_DEPENDENCY',
@@ -686,8 +843,17 @@ export class TaskBookService {
         409,
       );
     const edges = await this.database.select().from(taskDependencies);
-    if (edges.some((edge) => edge.taskId === taskId && edge.dependsOnTaskId === dependsOnTaskId))
-      throw new DomainError('DUPLICATE_DEPENDENCY', 'This dependency already exists', 409);
+    if (
+      edges.some(
+        (edge) =>
+          edge.taskId === taskId && edge.dependsOnTaskId === dependsOnTaskId,
+      )
+    )
+      throw new DomainError(
+        'DUPLICATE_DEPENDENCY',
+        'This dependency already exists',
+        409,
+      );
     assertAcyclic(taskId, dependsOnTaskId, edges);
     const [created] = await this.database
       .insert(taskDependencies)
@@ -745,7 +911,10 @@ export class TaskBookService {
         ),
       );
     for (const [position, item] of scope.entries())
-      await database.update(tasks).set({ position, updatedAt: now() }).where(eq(tasks.id, item.id));
+      await database
+        .update(tasks)
+        .set({ position, updatedAt: now() })
+        .where(eq(tasks.id, item.id));
   }
 
   private async assertTaskScope(
@@ -758,7 +927,11 @@ export class TaskBookService {
       .from(taskCollections)
       .where(eq(taskCollections.id, collectionId));
     if (!collection)
-      throw new DomainError('COLLECTION_NOT_FOUND', 'Task collection not found', 404);
+      throw new DomainError(
+        'COLLECTION_NOT_FOUND',
+        'Task collection not found',
+        404,
+      );
     if (collection.structure === 'FLAT' && phaseId)
       throw new DomainError(
         'FLAT_TASK_PHASE',
@@ -769,7 +942,9 @@ export class TaskBookService {
       const [phase] = await database
         .select()
         .from(phases)
-        .where(and(eq(phases.id, phaseId), eq(phases.collectionId, collectionId)));
+        .where(
+          and(eq(phases.id, phaseId), eq(phases.collectionId, collectionId)),
+        );
       if (!phase)
         throw new DomainError(
           'CROSS_COLLECTION_PHASE',

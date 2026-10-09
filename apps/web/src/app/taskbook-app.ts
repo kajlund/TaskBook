@@ -12,7 +12,12 @@ import {
 } from '../services/api-client';
 
 type Route =
-  | { kind: 'collection'; id: string; destination?: 'backlog' | 'phase'; phaseId?: string }
+  | {
+      kind: 'collection';
+      id: string;
+      destination?: 'backlog' | 'phase';
+      phaseId?: string;
+    }
   | { kind: 'today' | 'upcoming' | 'done' | 'archived' }
   | { kind: 'root' };
 type Modal =
@@ -42,7 +47,9 @@ const readStoredSelection = (key: string, legacyKey: string) => {
   return localStorage.getItem(key) ?? legacy;
 };
 const readRoute = (): Route => {
-  const phase = location.pathname.match(/^\/collections\/([^/]+)\/phases\/([^/]+)$/);
+  const phase = location.pathname.match(
+    /^\/collections\/([^/]+)\/phases\/([^/]+)$/,
+  );
   if (phase?.[1] && phase[2])
     return {
       kind: 'collection',
@@ -52,9 +59,14 @@ const readRoute = (): Route => {
     };
   const backlog = location.pathname.match(/^\/collections\/([^/]+)\/backlog$/);
   if (backlog?.[1])
-    return { kind: 'collection', id: decodeURIComponent(backlog[1]), destination: 'backlog' };
+    return {
+      kind: 'collection',
+      id: decodeURIComponent(backlog[1]),
+      destination: 'backlog',
+    };
   const match = location.pathname.match(/^\/collections\/([^/]+)$/);
-  if (match?.[1]) return { kind: 'collection', id: decodeURIComponent(match[1]) };
+  if (match?.[1])
+    return { kind: 'collection', id: decodeURIComponent(match[1]) };
   const kind = location.pathname.slice(1);
   return ['today', 'upcoming', 'done', 'archived'].includes(kind)
     ? { kind: kind as 'today' | 'upcoming' | 'done' | 'archived' }
@@ -122,7 +134,9 @@ export class TaskBookApp extends LitElement {
       this.collections = await api.collections();
       if (this.route.kind === 'root') {
         const remembered = readStoredSelection(lastKey, legacyLastKey);
-        const next = this.collections.find((item) => item.id === remembered) ?? this.collections[0];
+        const next =
+          this.collections.find((item) => item.id === remembered) ??
+          this.collections[0];
         if (next) return this.navigate(`/collections/${next.id}`, true);
       }
       await this.loadRoute();
@@ -137,7 +151,8 @@ export class TaskBookApp extends LitElement {
   }
   private fail(error: unknown) {
     this.loading = false;
-    this.error = error instanceof Error ? error.message : 'Something went wrong';
+    this.error =
+      error instanceof Error ? error.message : 'Something went wrong';
   }
   private async loadRoute() {
     const token = ++this.loadId;
@@ -152,10 +167,13 @@ export class TaskBookApp extends LitElement {
         const collection = await api.collection(this.route.id);
         const [tasks, phases] = await Promise.all([
           api.tasks(collection.id),
-          collection.structure === 'PHASED' ? api.phases(collection.id) : Promise.resolve([]),
+          collection.structure === 'PHASED'
+            ? api.phases(collection.id)
+            : Promise.resolve([]),
         ]);
         if (token !== this.loadId) return;
-        if (collection.status === 'ARCHIVED') return this.navigate('/archived', true);
+        if (collection.status === 'ARCHIVED')
+          return this.navigate('/archived', true);
         this.selected = collection;
         this.tasks = tasks;
         this.phases = phases;
@@ -166,7 +184,8 @@ export class TaskBookApp extends LitElement {
               phaseKey(collection.id),
               legacyPhaseKey(collection.id),
             );
-            const target = phases.find((phase) => phase.id === remembered) ?? phases[0];
+            const target =
+              phases.find((phase) => phase.id === remembered) ?? phases[0];
             return this.navigate(
               target
                 ? `/collections/${collection.id}/phases/${target.id}`
@@ -177,7 +196,8 @@ export class TaskBookApp extends LitElement {
           if (this.route.destination === 'phase') {
             const phaseId = this.route.phaseId;
             const target = phases.find((phase) => phase.id === phaseId);
-            if (target) localStorage.setItem(phaseKey(collection.id), target.id);
+            if (target)
+              localStorage.setItem(phaseKey(collection.id), target.id);
           }
         }
         const taskId = new URLSearchParams(location.search).get('task');
@@ -199,7 +219,9 @@ export class TaskBookApp extends LitElement {
         ]);
         if (token !== this.loadId) return;
         this.archived = all.filter((item) => item.status === 'ARCHIVED');
-        this.archivedTasks = archivedTasks.filter((task) => task.archivedAt !== null);
+        this.archivedTasks = archivedTasks.filter(
+          (task) => task.archivedAt !== null,
+        );
       } else if (
         this.route.kind === 'today' ||
         this.route.kind === 'upcoming' ||
@@ -272,7 +294,9 @@ export class TaskBookApp extends LitElement {
     this.errors = errors;
     if (Object.keys(errors).length) {
       void this.updateComplete.then(() =>
-        form.querySelector<HTMLElement>(`[name="${Object.keys(errors)[0]}"]`)?.focus(),
+        form
+          .querySelector<HTMLElement>(`[name="${Object.keys(errors)[0]}"]`)
+          ?.focus(),
       );
       return null;
     }
@@ -280,7 +304,9 @@ export class TaskBookApp extends LitElement {
       name,
       description: String(data.get('description') ?? '').trim() || null,
       structure: String(data.get('structure')) as CollectionInput['structure'],
-      ...(data.get('status') && { status: String(data.get('status')) as CollectionStatus }),
+      ...(data.get('status') && {
+        status: String(data.get('status')) as CollectionStatus,
+      }),
       startDate,
       targetEndDate,
     };
@@ -304,7 +330,10 @@ export class TaskBookApp extends LitElement {
         document.querySelector<HTMLElement>('#collection-title')?.focus(),
       );
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not save collection.' };
+      this.errors = {
+        form:
+          error instanceof Error ? error.message : 'Could not save collection.',
+      };
     } finally {
       this.submitting = false;
     }
@@ -322,7 +351,10 @@ export class TaskBookApp extends LitElement {
       this.navigate(next ? `/collections/${next.id}` : '/', true);
     } catch (error) {
       this.errors = {
-        form: error instanceof Error ? error.message : 'Could not archive collection.',
+        form:
+          error instanceof Error
+            ? error.message
+            : 'Could not archive collection.',
       };
     } finally {
       this.submitting = false;
@@ -335,7 +367,10 @@ export class TaskBookApp extends LitElement {
       this.notice = 'Collection restored.';
       this.navigate(`/collections/${restored.id}`);
     } catch (error) {
-      this.notice = error instanceof Error ? error.message : 'Could not restore collection.';
+      this.notice =
+        error instanceof Error
+          ? error.message
+          : 'Could not restore collection.';
     }
   }
   private async deleteArchived() {
@@ -348,7 +383,10 @@ export class TaskBookApp extends LitElement {
       await this.loadRoute();
     } catch (error) {
       this.errors = {
-        form: error instanceof Error ? error.message : 'Could not delete collection.',
+        form:
+          error instanceof Error
+            ? error.message
+            : 'Could not delete collection.',
       };
     } finally {
       this.submitting = false;
@@ -369,7 +407,10 @@ export class TaskBookApp extends LitElement {
       );
     } catch (error) {
       this.collections = previous;
-      this.notice = error instanceof Error ? error.message : 'Could not reorder collections.';
+      this.notice =
+        error instanceof Error
+          ? error.message
+          : 'Could not reorder collections.';
     }
   }
   private move(id: string, delta: number) {
@@ -383,7 +424,9 @@ export class TaskBookApp extends LitElement {
   }
   private drop(targetId: string) {
     if (!this.draggedId || this.draggedId === targetId) return;
-    const from = this.collections.findIndex((item) => item.id === this.draggedId);
+    const from = this.collections.findIndex(
+      (item) => item.id === this.draggedId,
+    );
     const to = this.collections.findIndex((item) => item.id === targetId);
     if (from < 0 || to < 0) return;
     const previous = [...this.collections];
@@ -420,20 +463,25 @@ export class TaskBookApp extends LitElement {
     this.submitting = true;
     const existing = this.modal.phase;
     try {
-      const saved = existing
-        ? await api.updatePhase(existing.id, input)
-        : await api.createPhase(this.selected.id, input);
+      if (existing) await api.updatePhase(existing.id, input);
+      else await api.createPhase(this.selected.id, input);
       this.phases = await api.phases(this.selected.id);
       this.taskFormPhaseCache.delete(this.selected.id);
       this.notice = existing ? 'Phase updated.' : 'Phase created.';
       this.openModal({ kind: 'phases' });
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not save phase.' };
+      this.errors = {
+        form: error instanceof Error ? error.message : 'Could not save phase.',
+      };
     } finally {
       this.submitting = false;
     }
   }
-  private async persistPhaseOrder(next: Phase[], previous: Phase[], moved: Phase) {
+  private async persistPhaseOrder(
+    next: Phase[],
+    previous: Phase[],
+    moved: Phase,
+  ) {
     this.phases = next.map((phase, position) => ({ ...phase, position }));
     try {
       await api.reorderPhases(
@@ -443,11 +491,14 @@ export class TaskBookApp extends LitElement {
       this.phases = await api.phases(this.selected!.id);
       this.notice = `Moved ${moved.name} to position ${this.phases.findIndex((p) => p.id === moved.id) + 1}.`;
       void this.updateComplete.then(() =>
-        document.querySelector<HTMLElement>(`[data-phase-id="${moved.id}"]`)?.focus(),
+        document
+          .querySelector<HTMLElement>(`[data-phase-id="${moved.id}"]`)
+          ?.focus(),
       );
     } catch (error) {
       this.phases = previous;
-      this.notice = error instanceof Error ? error.message : 'Could not reorder phases.';
+      this.notice =
+        error instanceof Error ? error.message : 'Could not reorder phases.';
     }
   }
   private movePhase(id: string, delta: number) {
@@ -482,7 +533,10 @@ export class TaskBookApp extends LitElement {
       this.phases = next;
       this.taskFormPhaseCache.delete(this.selected.id);
       this.notice = 'Phase deleted.';
-      if (this.route.kind === 'collection' && this.route.phaseId === deleted.id) {
+      if (
+        this.route.kind === 'collection' &&
+        this.route.phaseId === deleted.id
+      ) {
         const destination = next[index] ?? next[index - 1];
         const newPath = destination
           ? `/collections/${this.selected.id}/phases/${destination.id}`
@@ -498,7 +552,10 @@ export class TaskBookApp extends LitElement {
         })
         .catch(() => {});
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not delete phase.' };
+      this.errors = {
+        form:
+          error instanceof Error ? error.message : 'Could not delete phase.',
+      };
     } finally {
       this.submitting = false;
     }
@@ -507,9 +564,9 @@ export class TaskBookApp extends LitElement {
   private hasPhaseTasks(phase: Phase) {
     return Boolean(
       phase.hasTasks ??
-        (phase.taskCount > 0 ||
-          this.tasks.some((task) => task.phaseId === phase.id) ||
-          this.archivedTasks.some((task) => task.phaseId === phase.id)),
+      (phase.taskCount > 0 ||
+        this.tasks.some((task) => task.phaseId === phase.id) ||
+        this.archivedTasks.some((task) => task.phaseId === phase.id)),
     );
   }
 
@@ -521,7 +578,8 @@ export class TaskBookApp extends LitElement {
       : null;
   }
   private prepareTaskForm(task?: Task) {
-    const collectionId = task?.collectionId ?? this.selected?.id ?? this.collections[0]?.id ?? '';
+    const collectionId =
+      task?.collectionId ?? this.selected?.id ?? this.collections[0]?.id ?? '';
     this.taskFormCollectionId = collectionId;
     this.taskFormPhaseId = task?.phaseId ?? this.taskContextPhase();
     this.taskFormPhasesError = '';
@@ -529,12 +587,18 @@ export class TaskBookApp extends LitElement {
       this.selected?.id === collectionId && this.selected.structure === 'PHASED'
         ? this.phases
         : undefined;
-    if (currentCollectionPhases) this.taskFormPhaseCache.set(collectionId, currentCollectionPhases);
+    if (currentCollectionPhases)
+      this.taskFormPhaseCache.set(collectionId, currentCollectionPhases);
     void this.loadTaskFormPhases(collectionId, this.taskFormPhaseId);
   }
-  private async loadTaskFormPhases(collectionId: string, desiredPhaseId: string | null) {
+  private async loadTaskFormPhases(
+    collectionId: string,
+    desiredPhaseId: string | null,
+  ) {
     const token = ++this.taskFormPhaseLoadId;
-    const collection = this.collections.find((item) => item.id === collectionId);
+    const collection = this.collections.find(
+      (item) => item.id === collectionId,
+    );
     this.taskFormPhasesError = '';
     if (!collection || collection.structure === 'FLAT') {
       this.taskFormPhases = [];
@@ -556,25 +620,39 @@ export class TaskBookApp extends LitElement {
     this.taskFormPhasesLoading = true;
     try {
       const loaded = await api.phases(collectionId);
-      if (token !== this.taskFormPhaseLoadId || this.taskFormCollectionId !== collectionId) return;
+      if (
+        token !== this.taskFormPhaseLoadId ||
+        this.taskFormCollectionId !== collectionId
+      )
+        return;
       this.taskFormPhaseCache.set(collectionId, loaded);
       this.taskFormPhases = loaded;
       this.taskFormPhaseId = loaded.some((phase) => phase.id === desiredPhaseId)
         ? desiredPhaseId
         : null;
     } catch (error) {
-      if (token !== this.taskFormPhaseLoadId || this.taskFormCollectionId !== collectionId) return;
+      if (
+        token !== this.taskFormPhaseLoadId ||
+        this.taskFormCollectionId !== collectionId
+      )
+        return;
       this.taskFormPhasesError =
-        error instanceof Error ? error.message : 'Could not load destination phases.';
+        error instanceof Error
+          ? error.message
+          : 'Could not load destination phases.';
     } finally {
-      if (token === this.taskFormPhaseLoadId) this.taskFormPhasesLoading = false;
+      if (token === this.taskFormPhaseLoadId)
+        this.taskFormPhasesLoading = false;
     }
   }
   private changeTaskCollection(event: Event) {
     const collectionId = (event.currentTarget as HTMLSelectElement).value;
-    const original = this.modal?.kind === 'task-form' ? this.modal.task : undefined;
+    const original =
+      this.modal?.kind === 'task-form' ? this.modal.task : undefined;
     const desiredPhaseId =
-      original && original.collectionId === collectionId ? original.phaseId : null;
+      original && original.collectionId === collectionId
+        ? original.phaseId
+        : null;
     this.taskFormCollectionId = collectionId;
     this.taskFormPhaseId = desiredPhaseId;
     void this.loadTaskFormPhases(collectionId, desiredPhaseId);
@@ -596,14 +674,20 @@ export class TaskBookApp extends LitElement {
   private closeTask = () => {
     const query = new URLSearchParams(location.search);
     query.delete('task');
-    history.pushState({}, '', `${location.pathname}${query.size ? `?${query}` : ''}`);
+    history.pushState(
+      {},
+      '',
+      `${location.pathname}${query.size ? `?${query}` : ''}`,
+    );
     this.taskDetail = null;
   };
   private async reloadTasks() {
     if (this.route.kind === 'collection' && this.selected) {
       [this.tasks, this.phases, this.selected] = await Promise.all([
         api.tasks(this.selected.id),
-        this.selected.structure === 'PHASED' ? api.phases(this.selected.id) : Promise.resolve([]),
+        this.selected.structure === 'PHASED'
+          ? api.phases(this.selected.id)
+          : Promise.resolve([]),
         api.collection(this.selected.id),
       ]);
     } else await this.loadRoute();
@@ -613,21 +697,29 @@ export class TaskBookApp extends LitElement {
       name = String(data.get('name') ?? '').trim();
     if (!name) {
       this.errors = { name: 'Enter a task name.' };
-      void this.updateComplete.then(() => form.querySelector<HTMLElement>('[name=name]')?.focus());
+      void this.updateComplete.then(() =>
+        form.querySelector<HTMLElement>('[name=name]')?.focus(),
+      );
       return null;
     }
     const collectionId = this.taskFormCollectionId;
-    const collection = this.collections.find((item) => item.id === collectionId);
+    const collection = this.collections.find(
+      (item) => item.id === collectionId,
+    );
     if (!collection && !existing?.archivedAt) {
       this.errors = { collectionId: 'Choose an active collection.' };
       return null;
     }
     if (collection?.structure === 'PHASED' && this.taskFormPhasesLoading) {
-      this.errors = { phaseId: 'Wait for destination phases to finish loading.' };
+      this.errors = {
+        phaseId: 'Wait for destination phases to finish loading.',
+      };
       return null;
     }
     if (collection?.structure === 'PHASED' && this.taskFormPhasesError) {
-      this.errors = { phaseId: 'Retry loading destination phases before saving.' };
+      this.errors = {
+        phaseId: 'Retry loading destination phases before saving.',
+      };
       return null;
     }
     return {
@@ -676,10 +768,13 @@ export class TaskBookApp extends LitElement {
       this.modal = null;
       const moved =
         existing &&
-        (existing.collectionId !== saved.collectionId || existing.phaseId !== saved.phaseId);
+        (existing.collectionId !== saved.collectionId ||
+          existing.phaseId !== saved.phaseId);
       if (moved) {
         this.collections = await api.collections();
-        const destination = this.collections.find((item) => item.id === saved.collectionId)!;
+        const destination = this.collections.find(
+          (item) => item.id === saved.collectionId,
+        )!;
         this.notice = `Task moved to ${destination.name}.`;
         const path =
           destination.structure === 'FLAT'
@@ -699,7 +794,9 @@ export class TaskBookApp extends LitElement {
         this.selectTask(saved);
       }
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not save task.' };
+      this.errors = {
+        form: error instanceof Error ? error.message : 'Could not save task.',
+      };
       void this.updateComplete.then(() => {
         const message = this.errors.form?.toLowerCase() ?? '';
         const name = message.includes('phase')
@@ -717,17 +814,27 @@ export class TaskBookApp extends LitElement {
     const previous = [...this.tasks];
     this.tasks = this.tasks.map((item) =>
       item.id === task.id
-        ? { ...item, completedAt: task.completedAt ? null : new Date().toISOString() }
+        ? {
+            ...item,
+            completedAt: task.completedAt ? null : new Date().toISOString(),
+          }
         : item,
     );
     try {
-      const updated = await api.completeTask(task.id, Boolean(task.completedAt));
-      this.notice = updated.completedAt ? `${task.name} completed.` : `${task.name} reopened.`;
+      const updated = await api.completeTask(
+        task.id,
+        Boolean(task.completedAt),
+      );
+      this.notice = updated.completedAt
+        ? `${task.name} completed.`
+        : `${task.name} reopened.`;
       await this.reloadTasks();
-      if (this.taskDetail?.id === task.id) this.taskDetail = await api.task(task.id);
+      if (this.taskDetail?.id === task.id)
+        this.taskDetail = await api.task(task.id);
     } catch (error) {
       this.tasks = previous;
-      this.notice = error instanceof Error ? error.message : 'Could not update task.';
+      this.notice =
+        error instanceof Error ? error.message : 'Could not update task.';
     }
   }
   private async archiveTask() {
@@ -741,7 +848,10 @@ export class TaskBookApp extends LitElement {
       await this.reloadTasks();
       this.notice = `${task.name} archived.`;
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not archive task.' };
+      this.errors = {
+        form:
+          error instanceof Error ? error.message : 'Could not archive task.',
+      };
     } finally {
       this.submitting = false;
     }
@@ -752,7 +862,8 @@ export class TaskBookApp extends LitElement {
       this.notice = `${task.name} restored.`;
       await this.loadRoute();
     } catch (error) {
-      this.notice = error instanceof Error ? error.message : 'Could not restore task.';
+      this.notice =
+        error instanceof Error ? error.message : 'Could not restore task.';
     }
   }
   private async deleteArchivedTask() {
@@ -765,7 +876,9 @@ export class TaskBookApp extends LitElement {
       this.notice = `${task.name} permanently deleted.`;
       await this.loadRoute();
     } catch (error) {
-      this.errors = { form: error instanceof Error ? error.message : 'Could not delete task.' };
+      this.errors = {
+        form: error instanceof Error ? error.message : 'Could not delete task.',
+      };
     } finally {
       this.submitting = false;
     }
@@ -774,17 +887,22 @@ export class TaskBookApp extends LitElement {
     const scopeIds = new Set(next.map((task) => task.id));
     let scopeIndex = 0;
     this.tasks = this.tasks.map((task) =>
-      scopeIds.has(task.id) ? { ...next[scopeIndex]!, position: scopeIndex++ } : task,
+      scopeIds.has(task.id)
+        ? { ...next[scopeIndex]!, position: scopeIndex++ }
+        : task,
     );
     try {
       await api.reorderTasks(next.map((task) => task.id));
       this.notice = `Moved ${moved.name} to position ${next.indexOf(moved) + 1}.`;
       void this.updateComplete.then(() =>
-        document.querySelector<HTMLElement>(`[data-task-id="${moved.id}"]`)?.focus(),
+        document
+          .querySelector<HTMLElement>(`[data-task-id="${moved.id}"]`)
+          ?.focus(),
       );
     } catch (error) {
       this.tasks = previous;
-      this.notice = error instanceof Error ? error.message : 'Could not reorder tasks.';
+      this.notice =
+        error instanceof Error ? error.message : 'Could not reorder tasks.';
     }
   }
   private moveTaskOrder(id: string, delta: number, scope: Task[]) {
@@ -811,7 +929,9 @@ export class TaskBookApp extends LitElement {
 
   private sidebar() {
     return html`<aside class="sidebar">
-      <div class="brand"><img src="/brand/taskbook-horizontal.svg" alt="TaskBook" /></div>
+      <div class="brand">
+        <img src="/brand/taskbook-horizontal.svg" alt="TaskBook" />
+      </div>
       <nav aria-label="Primary">
         ${(['today', 'upcoming', 'done'] as const).map(
           (name) =>
@@ -972,13 +1092,16 @@ export class TaskBookApp extends LitElement {
           <small>PROGRESS</small>
           <div class="progress"><i style=${`width:${percent}%`}></i></div>
           <p>
-            ${item.progress.completed} of ${item.progress.total} active tasks complete · ${percent}%
+            ${item.progress.completed} of ${item.progress.total} active tasks
+            complete · ${percent}%
           </p>
         </div>
         <div>
           <small>ORGANIZATION</small>
           <p>
-            <i class=${item.structure === 'FLAT' ? 'ph ph-list-checks' : 'ph ph-stack'}></i
+            <i
+              class=${item.structure === 'FLAT' ? 'ph ph-list-checks' : 'ph ph-stack'}
+            ></i
             >${item.structure === 'FLAT' ? 'Simple task list' : 'Organized into phases'}
           </p>
         </div>
@@ -1011,7 +1134,9 @@ export class TaskBookApp extends LitElement {
   private taskList(scope: Task[], contextual = false) {
     return html`<div class="task-list">
       ${scope.map((task, index) => {
-        const collection = this.collections.find((item) => item.id === task.collectionId),
+        const collection = this.collections.find(
+            (item) => item.id === task.collectionId,
+          ),
           phase = this.phases.find((item) => item.id === task.phaseId);
         return html`<article
           class=${task.isWaiting || task.waitingReason ? 'waiting-task' : ''}
@@ -1025,8 +1150,10 @@ export class TaskBookApp extends LitElement {
             data-task-id=${task.id}
             aria-label=${`Drag ${task.name}`}
             @keydown=${(event: KeyboardEvent) => {
-              if (event.altKey && event.key === 'ArrowUp') this.moveTaskOrder(task.id, -1, scope);
-              if (event.altKey && event.key === 'ArrowDown') this.moveTaskOrder(task.id, 1, scope);
+              if (event.altKey && event.key === 'ArrowUp')
+                this.moveTaskOrder(task.id, -1, scope);
+              if (event.altKey && event.key === 'ArrowDown')
+                this.moveTaskOrder(task.id, 1, scope);
             }}
           >
             <i class="ph ph-dots-six-vertical"></i></button
@@ -1037,7 +1164,8 @@ export class TaskBookApp extends LitElement {
           >
             <i class="ph ph-check"></i></button
           ><button class="task-name" @click=${() => this.selectTask(task)}>
-            <strong class=${task.completedAt ? 'struck' : ''}>${task.name}</strong
+            <strong class=${task.completedAt ? 'struck' : ''}
+              >${task.name}</strong
             >${contextual ? html`<small>${collection?.name ?? 'Collection'} · ${phase?.name ?? (collection?.structure === 'PHASED' ? 'Backlog' : 'Task list')}</small>` : nothing}</button
           ><span class=${`urgency ${task.urgency.toLowerCase()}`}
             ><i></i>${task.urgency.toLowerCase()}</span
@@ -1065,13 +1193,16 @@ export class TaskBookApp extends LitElement {
     </div>`;
   }
   private phasedView() {
-    const phaseId = this.route.kind === 'collection' ? this.route.phaseId : undefined;
+    const phaseId =
+      this.route.kind === 'collection' ? this.route.phaseId : undefined;
     const selected =
       this.route.kind === 'collection' && this.route.destination === 'phase'
         ? this.phases.find((phase) => phase.id === phaseId)
         : undefined;
     const unknown =
-      this.route.kind === 'collection' && this.route.destination === 'phase' && !selected;
+      this.route.kind === 'collection' &&
+      this.route.destination === 'phase' &&
+      !selected;
     const selectedIndex = selected ? this.phases.indexOf(selected) : -1;
     const visibleTasks = selected
       ? this.tasks.filter((task) => task.phaseId === selected.id)
@@ -1109,7 +1240,9 @@ export class TaskBookApp extends LitElement {
           @click=${() => this.navigate(`/collections/${this.selected!.id}/backlog`)}
         >
           <span><i class="ph ph-tray"></i></span><b>Backlog</b
-          ><small>${this.tasks.filter((task) => !task.phaseId).length} tasks</small></button
+          ><small
+            >${this.tasks.filter((task) => !task.phaseId).length} tasks</small
+          ></button
         >${this.phases.map((phase, index) => html`<button class=${`${selected?.id === phase.id ? 'current' : ''} ${phase.isComplete ? 'complete' : ''}`} @click=${() => this.navigate(`/collections/${this.selected!.id}/phases/${phase.id}`)}><span>${phase.isComplete ? html`<i class="ph ph-check"></i>` : index + 1}</span><b>${phase.name}</b><small>${phase.completedTaskCount}/${phase.taskCount} complete</small></button>`)}
       </div>
       ${
@@ -1128,7 +1261,10 @@ export class TaskBookApp extends LitElement {
           : html`<div class="phase-layout">
               <div class="phase-content">
                 <div class="section-title">
-                  <h2>${selected?.name ?? 'Backlog'} <span>${visibleTasks.length}</span></h2>
+                  <h2>
+                    ${selected?.name ?? 'Backlog'}
+                    <span>${visibleTasks.length}</span>
+                  </h2>
                   <button
                     class="primary"
                     @click=${(event: MouseEvent) => this.openModal({ kind: 'task-form' }, event.currentTarget as HTMLElement)}
@@ -1151,9 +1287,14 @@ export class TaskBookApp extends LitElement {
               ${
                 selected
                   ? html`<aside class="phase-inspector">
-                      <small>PHASE ${selected.position + 1} OF ${this.phases.length}</small>
+                      <small
+                        >PHASE ${selected.position + 1} OF
+                        ${this.phases.length}</small
+                      >
                       <h2 id="phase-title" tabindex="-1">${selected.name}</h2>
-                      <p>${selected.description ?? 'No description or goal provided.'}</p>
+                      <p>
+                        ${selected.description ?? 'No description or goal provided.'}
+                      </p>
                       <p class="schedule">
                         <i class="ph ph-calendar-blank"></i
                         >${selected.startDate || selected.targetEndDate ? `${selected.startDate ?? 'No start'} – ${selected.targetEndDate ?? 'No target'}` : 'No schedule'}
@@ -1175,7 +1316,9 @@ export class TaskBookApp extends LitElement {
                         earlierIncomplete.length
                           ? html`<div class="advisory">
                               <b>Earlier incomplete phases</b>
-                              <p>${earlierIncomplete.map((phase) => phase.name).join(', ')}</p>
+                              <p>
+                                ${earlierIncomplete.map((phase) => phase.name).join(', ')}
+                              </p>
                             </div>`
                           : nothing
                       }
@@ -1197,7 +1340,9 @@ export class TaskBookApp extends LitElement {
         <div>
           <small>COLLECTIONS</small>
           <h1>Archived collections</h1>
-          <p>Restore collections or permanently remove data you no longer need.</p>
+          <p>
+            Restore collections or permanently remove data you no longer need.
+          </p>
         </div>
       </header>
       <section class="workspace archived-list">
@@ -1206,12 +1351,15 @@ export class TaskBookApp extends LitElement {
             ? this.archived.map(
                 (item) =>
                   html`<article>
-                    <i class=${item.structure === 'FLAT' ? 'ph ph-list-checks' : 'ph ph-stack'}></i>
+                    <i
+                      class=${item.structure === 'FLAT' ? 'ph ph-list-checks' : 'ph ph-stack'}
+                    ></i>
                     <div>
                       <h2>${item.name}</h2>
                       <p>${item.description ?? 'No description'}</p>
                     </div>
-                    <button class="outline" @click=${() => this.restore(item)}>Restore</button
+                    <button class="outline" @click=${() => this.restore(item)}>
+                      Restore</button
                     ><button
                       class="danger-text-button"
                       @click=${async (event: MouseEvent) => {
@@ -1256,19 +1404,27 @@ export class TaskBookApp extends LitElement {
                         ${this.collections.find((item) => item.id === task.collectionId)?.name ?? 'Collection'}
                       </p>
                     </div>
-                    <button class="outline" @click=${() => this.restoreTask(task)}>
+                    <button
+                      class="outline"
+                      @click=${() => this.restoreTask(task)}
+                    >
                       <i class="ph ph-arrow-counter-clockwise"></i>Restore task</button
                     ><button
                       class="danger-text-button"
                       @click=${async (event: MouseEvent) => {
                         try {
                           this.openModal(
-                            { kind: 'task-delete', task: await api.task(task.id) },
+                            {
+                              kind: 'task-delete',
+                              task: await api.task(task.id),
+                            },
                             event.currentTarget as HTMLElement,
                           );
                         } catch (error) {
                           this.notice =
-                            error instanceof Error ? error.message : 'Could not load task details.';
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not load task details.';
                         }
                       }}
                     >
@@ -1283,7 +1439,11 @@ export class TaskBookApp extends LitElement {
   }
   private utilityView() {
     const title =
-      this.route.kind === 'today' ? 'Today' : this.route.kind === 'upcoming' ? 'Upcoming' : 'Done';
+      this.route.kind === 'today'
+        ? 'Today'
+        : this.route.kind === 'upcoming'
+          ? 'Upcoming'
+          : 'Done';
     return html`<main>
       <header class="collection">
         <div>
@@ -1303,11 +1463,14 @@ export class TaskBookApp extends LitElement {
                   (date) =>
                     html`<section class="date-group">
                       <h2>
-                        ${new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
-                          weekday: 'long',
-                          month: 'long',
-                          day: 'numeric',
-                        })}
+                        ${new Date(`${date}T00:00:00`).toLocaleDateString(
+                          undefined,
+                          {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                          },
+                        )}
                       </h2>
                       ${this.taskList(
                         this.tasks.filter((task) => task.dueDate === date),
@@ -1339,7 +1502,9 @@ export class TaskBookApp extends LitElement {
         <div class="modal-heading">
           <div>
             <small>COLLECTION</small>
-            <h2 id="modal-title">${collection ? 'Edit collection' : 'New collection'}</h2>
+            <h2 id="modal-title">
+              ${collection ? 'Edit collection' : 'New collection'}
+            </h2>
           </div>
           <button
             type="button"
@@ -1352,7 +1517,10 @@ export class TaskBookApp extends LitElement {
         </div>
         ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}<label
           ><span class="field-label">Name <b aria-hidden="true">*</b></span
-          ><input name="name" required .value=${collection?.name ?? ''} /></label
+          ><input
+            name="name"
+            required
+            .value=${collection?.name ?? ''} /></label
         >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
           >Description<textarea name="description" rows="3">
 ${collection?.description ?? ''}</textarea>
@@ -1367,7 +1535,8 @@ ${collection?.description ?? ''}</textarea>
               .checked=${!collection || collection.structure === 'FLAT'}
             /><i class="ph ph-list-checks"></i
             ><span
-              ><b>Simple task list</b><small>Tasks ordered directly in the collection</small></span
+              ><b>Simple task list</b
+              ><small>Tasks ordered directly in the collection</small></span
             ></label
           ><label class="choice"
             ><input
@@ -1377,7 +1546,8 @@ ${collection?.description ?? ''}</textarea>
               .checked=${collection?.structure === 'PHASED'}
             /><i class="ph ph-stack"></i
             ><span
-              ><b>Organized into phases</b><small>Ordered phases with a backlog</small></span
+              ><b>Organized into phases</b
+              ><small>Ordered phases with a backlog</small></span
             ></label
           >
         </fieldset>
@@ -1407,7 +1577,8 @@ ${collection?.description ?? ''}</textarea>
             : nothing
         }
         <div class="modal-actions">
-          <button type="button" class="outline" @click=${this.closeModal}>Cancel</button
+          <button type="button" class="outline" @click=${this.closeModal}>
+            Cancel</button
           ><button class="primary" ?disabled=${this.submitting}>
             ${this.submitting ? 'Saving…' : collection ? 'Save changes' : 'Create collection'}
           </button>
@@ -1454,11 +1625,18 @@ ${collection?.description ?? ''}</textarea>
           <small>COLLECTION PHASES</small>
           <h2 id="modal-title">Manage phases</h2>
         </div>
-        <button class="icon-button" aria-label="Close dialog" @click=${this.closeModal}>
+        <button
+          class="icon-button"
+          aria-label="Close dialog"
+          @click=${this.closeModal}
+        >
           <i class="ph ph-x"></i>
         </button>
       </div>
-      <p>Drag phases into order, or use the move buttons. Changes are saved immediately.</p>
+      <p>
+        Drag phases into order, or use the move buttons. Changes are saved
+        immediately.
+      </p>
       <div class="managed-phases">
         ${this.phases.map(
           (phase, index) =>
@@ -1474,8 +1652,10 @@ ${collection?.description ?? ''}</textarea>
                 data-phase-id=${phase.id}
                 aria-label=${`Drag ${phase.name}`}
                 @keydown=${(event: KeyboardEvent) => {
-                  if (event.altKey && event.key === 'ArrowUp') this.movePhase(phase.id, -1);
-                  if (event.altKey && event.key === 'ArrowDown') this.movePhase(phase.id, 1);
+                  if (event.altKey && event.key === 'ArrowUp')
+                    this.movePhase(phase.id, -1);
+                  if (event.altKey && event.key === 'ArrowDown')
+                    this.movePhase(phase.id, 1);
                 }}
               >
                 <i class="ph ph-dots-six-vertical"></i>
@@ -1483,7 +1663,8 @@ ${collection?.description ?? ''}</textarea>
               <div>
                 <b>${phase.name}</b
                 ><small
-                  >${phase.taskCount} ${phase.taskCount === 1 ? 'task' : 'tasks'} ·
+                  >${phase.taskCount}
+                  ${phase.taskCount === 1 ? 'task' : 'tasks'} ·
                   ${Math.round(phase.progress * 100)}%</small
                 >
               </div>
@@ -1518,7 +1699,10 @@ ${collection?.description ?? ''}</textarea>
         )}
       </div>
       <div class="modal-actions">
-        <button class="primary" @click=${() => this.openModal({ kind: 'phase-form' })}>
+        <button
+          class="primary"
+          @click=${() => this.openModal({ kind: 'phase-form' })}
+        >
           <i class="ph ph-plus"></i>Add phase</button
         ><button class="outline" @click=${this.closeModal}>Done</button>
       </div>
@@ -1550,7 +1734,8 @@ ${collection?.description ?? ''}</textarea>
           ><span class="field-label">Name <b aria-hidden="true">*</b></span
           ><input name="name" required .value=${phase?.name ?? ''} /></label
         >${this.errors.name ? html`<p class="field-error" role="alert">${this.errors.name}</p>` : nothing}<label
-          >Description<textarea name="description" rows="3">${phase?.description ?? ''}</textarea>
+          >Description<textarea name="description" rows="3">
+${phase?.description ?? ''}</textarea>
         </label>
         <div class="form-grid">
           <label
@@ -1567,7 +1752,11 @@ ${collection?.description ?? ''}</textarea>
           >
         </div>
         <div class="modal-actions">
-          <button type="button" class="outline" @click=${() => this.openModal({ kind: 'phases' })}>
+          <button
+            type="button"
+            class="outline"
+            @click=${() => this.openModal({ kind: 'phases' })}
+          >
             Cancel</button
           ><button class="primary" ?disabled=${this.submitting}>
             ${this.submitting ? 'Saving…' : phase ? 'Save changes' : 'Create phase'}
@@ -1585,18 +1774,31 @@ ${collection?.description ?? ''}</textarea>
     >
       <div class="danger-icon"><i class="ph ph-trash"></i></div>
       <h2 id="confirm-title">Delete ${phase.name}?</h2>
-      <p>This empty phase will be permanently deleted. No tasks will be moved or deleted.</p>
+      <p>
+        This empty phase will be permanently deleted. No tasks will be moved or
+        deleted.
+      </p>
       ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
       <div class="modal-actions">
-        <button class="outline" @click=${() => this.openModal({ kind: 'phases' })}>Cancel</button
-        ><button class="danger" ?disabled=${this.submitting} @click=${this.confirmDeletePhase}>
+        <button
+          class="outline"
+          @click=${() => this.openModal({ kind: 'phases' })}
+        >
+          Cancel</button
+        ><button
+          class="danger"
+          ?disabled=${this.submitting}
+          @click=${this.confirmDeletePhase}
+        >
           ${this.submitting ? 'Deleting…' : 'Delete phase'}
         </button>
       </div>
     </dialog>`;
   }
   private taskFormModal(task?: Task) {
-    const collection = this.collections.find((item) => item.id === this.taskFormCollectionId);
+    const collection = this.collections.find(
+      (item) => item.id === this.taskFormCollectionId,
+    );
     const movingPreservesState =
       task &&
       (Boolean(task.completedAt) ||
@@ -1633,7 +1835,8 @@ ${collection?.description ?? ''}</textarea>
             .value=${task?.description ?? ''}
           ></textarea></label
         ><label
-          ><span class="field-label">Collection <b aria-hidden="true">*</b></span
+          ><span class="field-label"
+            >Collection <b aria-hidden="true">*</b></span
           ><select
             name="collectionId"
             required
@@ -1644,13 +1847,19 @@ ${collection?.description ?? ''}</textarea>
           >
             ${
               task?.archivedAt && !collection
-                ? html`<option value=${task.collectionId}>Current archived collection</option>`
+                ? html`<option value=${task.collectionId}>
+                    Current archived collection
+                  </option>`
                 : nothing
             }
             ${this.collections.map(
               (item) =>
-                html`<option value=${item.id} ?selected=${item.id === this.taskFormCollectionId}>
-                  ${item.name} — ${item.structure === 'FLAT' ? 'Flat' : 'Phased'}
+                html`<option
+                  value=${item.id}
+                  ?selected=${item.id === this.taskFormCollectionId}
+                >
+                  ${item.name} —
+                  ${item.structure === 'FLAT' ? 'Flat' : 'Phased'}
                 </option>`,
             )}
           </select></label
@@ -1663,7 +1872,8 @@ ${collection?.description ?? ''}</textarea>
         }${
           task?.archivedAt
             ? html`<p class="form-note">
-                Restore this archived task before moving it to another collection.
+                Restore this archived task before moving it to another
+                collection.
               </p>`
             : collection?.structure === 'PHASED'
               ? html`<label
@@ -1674,10 +1884,16 @@ ${collection?.description ?? ''}</textarea>
                       ?disabled=${this.taskFormPhasesLoading || Boolean(this.taskFormPhasesError)}
                       @change=${(event: Event) =>
                         (this.taskFormPhaseId =
-                          (event.currentTarget as HTMLSelectElement).value || null)}
+                          (event.currentTarget as HTMLSelectElement).value ||
+                          null)}
                       aria-describedby="phase-status"
                     >
-                      <option value="" ?selected=${this.taskFormPhaseId === null}>Backlog</option>
+                      <option
+                        value=""
+                        ?selected=${this.taskFormPhaseId === null}
+                      >
+                        Backlog
+                      </option>
                       ${this.taskFormPhases.map(
                         (phase) =>
                           html`<option
@@ -1690,11 +1906,19 @@ ${collection?.description ?? ''}</textarea>
                     </select></label
                   >${
                     this.taskFormPhasesLoading
-                      ? html`<p id="phase-status" class="form-note" role="status">
+                      ? html`<p
+                          id="phase-status"
+                          class="form-note"
+                          role="status"
+                        >
                           Loading phases…
                         </p>`
                       : this.taskFormPhasesError
-                        ? html`<div id="phase-status" class="form-error" role="alert">
+                        ? html`<div
+                            id="phase-status"
+                            class="form-error"
+                            role="alert"
+                          >
                             <span>${this.taskFormPhasesError}</span>
                             <button
                               type="button"
@@ -1708,20 +1932,27 @@ ${collection?.description ?? ''}</textarea>
                               Retry
                             </button>
                           </div>`
-                        : html`<p id="phase-status" class="sr-only" aria-live="polite">
-                            ${this.taskFormPhases.length} destination phases available. Backlog is
-                            also available.
+                        : html`<p
+                            id="phase-status"
+                            class="sr-only"
+                            aria-live="polite"
+                          >
+                            ${this.taskFormPhases.length} destination phases
+                            available. Backlog is also available.
                           </p>`
                   }${
                     this.errors.phaseId
-                      ? html`<p class="field-error" role="alert">${this.errors.phaseId}</p>`
+                      ? html`<p class="field-error" role="alert">
+                          ${this.errors.phaseId}
+                        </p>`
                       : nothing
                   }`
               : html`<input type="hidden" name="phaseId" value="" />`
         }${
           movingPreservesState
             ? html`<p class="form-note">
-                Completion and dependency links will be preserved if this task is moved.
+                Completion and dependency links will be preserved if this task
+                is moved.
               </p>`
             : nothing
         }
@@ -1733,17 +1964,27 @@ ${collection?.description ?? ''}</textarea>
               <option value="HIGH">High</option>
               <option value="CRITICAL">Critical</option>
             </select></label
-          ><label>Due date<input type="date" name="dueDate" .value=${task?.dueDate ?? ''} /></label>
+          ><label
+            >Due date<input
+              type="date"
+              name="dueDate"
+              .value=${task?.dueDate ?? ''}
+          /></label>
         </div>
         <label
-          >Waiting reason<input name="waitingReason" .value=${task?.waitingReason ?? ''}
+          >Waiting reason<input
+            name="waitingReason"
+            .value=${task?.waitingReason ?? ''}
         /></label>
         <div class="modal-actions">
-          <button type="button" class="outline" @click=${this.closeModal}>Cancel</button
+          <button type="button" class="outline" @click=${this.closeModal}>
+            Cancel</button
           ><button
             class="primary"
             ?disabled=${
-              this.submitting || this.taskFormPhasesLoading || Boolean(this.taskFormPhasesError)
+              this.submitting ||
+              this.taskFormPhasesLoading ||
+              Boolean(this.taskFormPhasesError)
             }
           >
             ${this.submitting ? 'Saving…' : task ? 'Save changes' : 'Create task'}
@@ -1761,18 +2002,26 @@ ${collection?.description ?? ''}</textarea>
     >
       <div class="danger-icon"><i class="ph ph-archive"></i></div>
       <h2 id="confirm-title">Archive ${task.name}?</h2>
-      <p>The task will leave active lists but can be restored from Archived collections.</p>
+      <p>
+        The task will leave active lists but can be restored from Archived
+        collections.
+      </p>
       ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
       <div class="modal-actions">
         <button class="outline" @click=${this.closeModal}>Cancel</button
-        ><button class="danger" ?disabled=${this.submitting} @click=${this.archiveTask}>
+        ><button
+          class="danger"
+          ?disabled=${this.submitting}
+          @click=${this.archiveTask}
+        >
           ${this.submitting ? 'Archiving…' : 'Archive task'}
         </button>
       </div>
     </dialog>`;
   }
   private taskDeleteModal(task: Task) {
-    const links = (task.dependencies?.length ?? 0) + (task.blockedTasks?.length ?? 0);
+    const links =
+      (task.dependencies?.length ?? 0) + (task.blockedTasks?.length ?? 0);
     return html`<dialog
       class="modal confirmation"
       aria-modal="true"
@@ -1782,13 +2031,17 @@ ${collection?.description ?? ''}</textarea>
       <div class="danger-icon"><i class="ph ph-trash"></i></div>
       <h2 id="confirm-title">Permanently delete ${task.name}?</h2>
       <p>
-        This removes the archived task and ${links} dependency ${links === 1 ? 'link' : 'links'}.
-        This cannot be undone.
+        This removes the archived task and ${links} dependency
+        ${links === 1 ? 'link' : 'links'}. This cannot be undone.
       </p>
       ${this.errors.form ? html`<p class="form-error" role="alert">${this.errors.form}</p>` : nothing}
       <div class="modal-actions">
         <button class="outline" @click=${this.closeModal}>Cancel</button
-        ><button class="danger" ?disabled=${this.submitting} @click=${this.deleteArchivedTask}>
+        ><button
+          class="danger"
+          ?disabled=${this.submitting}
+          @click=${this.deleteArchivedTask}
+        >
           ${this.submitting ? 'Deleting…' : 'Permanently delete'}
         </button>
       </div>
@@ -1797,7 +2050,9 @@ ${collection?.description ?? ''}</textarea>
   private taskInspector() {
     const task = this.taskDetail;
     if (!task) return nothing;
-    const collection = this.collections.find((item) => item.id === task.collectionId),
+    const collection = this.collections.find(
+        (item) => item.id === task.collectionId,
+      ),
       phase = this.phases.find((item) => item.id === task.phaseId);
     const eligible = this.tasks.filter(
       (item) =>
@@ -1809,13 +2064,19 @@ ${collection?.description ?? ''}</textarea>
     return html`<aside class="task-inspector" aria-label="Task details">
       <div class="inspector-heading">
         <small>TASK</small
-        ><button class="icon-button" aria-label="Close task inspector" @click=${this.closeTask}>
+        ><button
+          class="icon-button"
+          aria-label="Close task inspector"
+          @click=${this.closeTask}
+        >
           <i class="ph ph-x"></i>
         </button>
       </div>
       <h2 id="task-inspector-title" tabindex="-1">${task.name}</h2>
       <button class="outline" @click=${() => this.toggleTask(task)}>
-        <i class=${task.completedAt ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check'}></i
+        <i
+          class=${task.completedAt ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check'}
+        ></i
         >${task.completedAt ? 'Reopen task' : 'Mark complete'}
       </button>
       <p>${task.description ?? 'No description.'}</p>
@@ -1823,13 +2084,17 @@ ${collection?.description ?? ''}</textarea>
         <dt>Collection</dt>
         <dd>${collection?.name ?? 'Unknown'}</dd>
         <dt>Location</dt>
-        <dd>${phase?.name ?? (collection?.structure === 'PHASED' ? 'Backlog' : 'Task list')}</dd>
+        <dd>
+          ${phase?.name ?? (collection?.structure === 'PHASED' ? 'Backlog' : 'Task list')}
+        </dd>
         <dt>Urgency</dt>
         <dd>${task.urgency}</dd>
         <dt>Due date</dt>
         <dd>${task.dueDate ?? 'None'}</dd>
         <dt>Waiting</dt>
-        <dd>${task.isWaiting ? (task.waitingReason ?? 'Blocked by a dependency') : 'No'}</dd>
+        <dd>
+          ${task.isWaiting ? (task.waitingReason ?? 'Blocked by a dependency') : 'No'}
+        </dd>
         <dt>Created</dt>
         <dd>${new Date(task.createdAt).toLocaleString()}</dd>
         <dt>Updated</dt>
@@ -1858,7 +2123,9 @@ ${collection?.description ?? ''}</textarea>
                           this.notice = 'Dependency removed.';
                         } catch (error) {
                           this.notice =
-                            error instanceof Error ? error.message : 'Could not remove dependency.';
+                            error instanceof Error
+                              ? error.message
+                              : 'Could not remove dependency.';
                         }
                       }}
                     >
@@ -1877,7 +2144,10 @@ ${collection?.description ?? ''}</textarea>
               ><button
                 class="outline"
                 @click=${async () => {
-                  const id = document.querySelector<HTMLSelectElement>('#dependency-choice')?.value;
+                  const id =
+                    document.querySelector<HTMLSelectElement>(
+                      '#dependency-choice',
+                    )?.value;
                   if (!id) return;
                   try {
                     await api.addDependency(task.id, id);
@@ -1885,7 +2155,9 @@ ${collection?.description ?? ''}</textarea>
                     this.notice = 'Dependency added.';
                   } catch (error) {
                     this.notice =
-                      error instanceof Error ? error.message : 'Could not add dependency.';
+                      error instanceof Error
+                        ? error.message
+                        : 'Could not add dependency.';
                   }
                 }}
               >
@@ -1924,7 +2196,9 @@ ${collection?.description ?? ''}</textarea>
         : this.route.kind === 'collection' || this.route.kind === 'root'
           ? this.collectionView()
           : this.utilityView();
-    return html`<div class="shell collection-shell">${this.sidebar()}${content}</div>
+    return html`<div class="shell collection-shell">
+        ${this.sidebar()}${content}
+      </div>
       ${this.taskInspector()}
       <div class="sr-only" aria-live="polite">${this.notice}</div>
       ${this.modal?.kind === 'form' ? this.formModal(this.modal.collection) : this.modal?.kind === 'archive' ? this.confirmModal(this.modal.collection, 'archive') : this.modal?.kind === 'delete' ? this.confirmModal(this.modal.collection, 'delete') : this.modal?.kind === 'phases' ? this.managePhasesModal() : this.modal?.kind === 'phase-form' ? this.phaseFormModal(this.modal.phase) : this.modal?.kind === 'phase-delete' ? this.phaseDeleteModal(this.modal.phase) : this.modal?.kind === 'task-form' ? this.taskFormModal(this.modal.task) : this.modal?.kind === 'task-archive' ? this.taskArchiveModal(this.modal.task) : this.modal?.kind === 'task-delete' ? this.taskDeleteModal(this.modal.task) : nothing}`;

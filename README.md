@@ -42,3 +42,16 @@ Database schema changes are generated with `npm run db:generate -w @taskbook/api
 - `docs/design`: approved visual references
 
 Ordering uses persisted integer positions and transactional resequencing. Task edits and cross-collection moves are committed atomically, with moved tasks appended to their destination scope. Phase completion, collection progress, blocking, and waiting are derived rather than stored. Authentication, collaboration, and milestones are intentionally outside version one.
+
+## Linting and formatting
+
+All Dreamquest projects use the same ESLint and Prettier configuration, based on Activus. Run these commands from the repository root:
+
+```sh
+npm run lint
+npm run lint:fix
+npm run format
+npm run format:check
+```
+
+ESLint checks supported JavaScript and TypeScript files and treats warnings as failures. Prettier formats its supported source, configuration, and documentation files with single quotes, trailing commas, and LF line endings. Dependencies, generated builds and test output, local data, editor settings, archived artifacts, and dependency lockfiles are excluded. SQL and Nunjucks templates are outside the installed tools' supported file types.

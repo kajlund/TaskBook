@@ -583,7 +583,9 @@ footer {
   }
   .thead,
   .task {
-    grid-template-columns: 30px 34px 28px minmax(180px, 1fr) 120px 100px 70px 60px;
+    grid-template-columns:
+      30px 34px 28px minmax(180px, 1fr)
+      120px 100px 70px 60px;
   }
 }
 @media (max-width: 760px) {

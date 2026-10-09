@@ -15,7 +15,10 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-export const collectionStructure = pgEnum('collection_structure', ['FLAT', 'PHASED']);
+export const collectionStructure = pgEnum('collection_structure', [
+  'FLAT',
+  'PHASED',
+]);
 export const collectionStatus = pgEnum('collection_status', [
   'ACTIVE',
   'PAUSED',
@@ -36,8 +39,12 @@ export const taskCollections = pgTable(
     targetEndDate: date('target_end_date'),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     position: integer().notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     check('collection_name_not_blank', sql`length(trim(${t.name})) > 0`),
@@ -63,8 +70,12 @@ export const phases = pgTable(
     position: integer().notNull(),
     startDate: date('start_date'),
     targetEndDate: date('target_end_date'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     unique('phase_id_collection_unique').on(t.id, t.collectionId),
@@ -92,8 +103,12 @@ export const tasks = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     position: integer().notNull(),
     waitingReason: text('waiting_reason'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
   },
   (t) => [
@@ -123,7 +138,9 @@ export const taskDependencies = pgTable(
     dependsOnTaskId: uuid('depends_on_task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.taskId, t.dependsOnTaskId] }),

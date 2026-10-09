@@ -4,7 +4,12 @@ export const uuidSchema = z.string().uuid();
 export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const nullableDateSchema = dateSchema.nullable();
 export const collectionStructureSchema = z.enum(['FLAT', 'PHASED']);
-export const collectionStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'COMPLETED', 'ARCHIVED']);
+export const collectionStatusSchema = z.enum([
+  'ACTIVE',
+  'PAUSED',
+  'COMPLETED',
+  'ARCHIVED',
+]);
 export const urgencySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 
 const trimmedName = z.string().trim().min(1).max(200);
@@ -22,7 +27,10 @@ const validSchedule = <T extends z.ZodRawShape>(shape: T) =>
         !value.startDate ||
         !value.targetEndDate ||
         String(value.targetEndDate) >= String(value.startDate),
-      { message: 'Target end date cannot precede start date', path: ['targetEndDate'] },
+      {
+        message: 'Target end date cannot precede start date',
+        path: ['targetEndDate'],
+      },
     );
 
 export const createCollectionSchema = validSchedule({
@@ -68,8 +76,12 @@ export const createTaskSchema = z.object({
   waitingReason: z.string().trim().min(1).max(1000).nullable().optional(),
 });
 
-export const updateTaskSchema = createTaskSchema.omit({ collectionId: true }).partial();
-export const reorderSchema = z.object({ orderedIds: z.array(uuidSchema).min(1) });
+export const updateTaskSchema = createTaskSchema
+  .omit({ collectionId: true })
+  .partial();
+export const reorderSchema = z.object({
+  orderedIds: z.array(uuidSchema).min(1),
+});
 export const moveTaskSchema = createTaskSchema
   .omit({ collectionId: true, phaseId: true, urgency: true })
   .partial()
@@ -97,5 +109,10 @@ export type CollectionStatus = z.infer<typeof collectionStatusSchema>;
 export type Urgency = z.infer<typeof urgencySchema>;
 export type ApiSuccess<T> = { data: T; meta?: Record<string, unknown> };
 export type ApiError = {
-  error: { code: string; message: string; details?: unknown; requestId: string };
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+    requestId: string;
+  };
 };
